@@ -146,8 +146,8 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Ollama settings
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
-PHI3_MODEL = 'phi3:latest'
-LLAMA3_MODEL = 'llama3:latest'
+PHI3_MODEL = 'tinyllama'
+LLAMA3_MODEL = 'tinyllama'
 
 # File upload settings
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
@@ -155,4 +155,19 @@ ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
 
 # Tesseract OCR settings
 TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
+
+
+# Swagger/OpenAPI settings
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': "Type in the *'Value'* input box below: **'Bearer &lt;your_jwt_token&gt;'**"
+        }
+    },
+    'USE_SESSION_AUTH': False,
+    'JSON_EDITOR': True,
+}
 

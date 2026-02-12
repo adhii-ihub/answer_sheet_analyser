@@ -14,7 +14,28 @@ class AIEvaluationService:
     def __init__(self):
         self.phi3_model = settings.PHI3_MODEL
         self.llama3_model = settings.LLAMA3_MODEL
+        print(f"⚡ AI Service initialized with model: {self.llama3_model}")
         self.client = ollama.Client(host=settings.OLLAMA_HOST)
+
+    def evaluate(self, question_text, answer_text, rubric_text):
+        """
+        Combined evaluation using phi3 model synchronous.
+        Since we are using phi3 for everything, we just run the detailed prompt
+        to get all necessary fields in one go.
+        """
+        # Run detailed evaluation with phi3
+        detailed_result = self.detailed_evaluate(question_text, answer_text, rubric_text)
+        
+        # Return results
+        return {
+            'score': detailed_result.get('final_score', 0),
+            'quick_feedback': detailed_result.get('detailed_feedback', '')[:200] + "...", # Truncate for quick feedback
+            'final_score': detailed_result.get('final_score', 0),
+            'strengths': detailed_result.get('strengths', []),
+            'mistakes': detailed_result.get('mistakes', []),
+            'improvement_suggestions': detailed_result.get('improvement_suggestions', []),
+            'detailed_feedback': detailed_result.get('detailed_feedback', '')
+        }
     
     def quick_evaluate(self, question_text, answer_text, rubric_text):
         """
@@ -69,26 +90,28 @@ class AIEvaluationService:
             )
             
             # Parse response
-            result = json.loads(response['response'])
+            try:
+                result = json.loads(response['response'])
+            except json.JSONDecodeError:
+                # Fallback: try to find JSON-like content
+                import re
+                json_match = re.search(r'\{.*\}', response['response'], re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                else:
+                    raise ValueError("Could not parse JSON from response")
             
-            # Validate response structure
-            required_fields = [
-                'final_score', 'strengths', 'mistakes', 
-                'improvement_suggestions', 'detailed_feedback'
-            ]
-            for field in required_fields:
-                if field not in result:
-                    raise ValueError(f"Missing field '{field}' in AI response")
-            
+            # Relaxed validation - just try to get fields
             return {
-                'final_score': float(result['final_score']),
-                'strengths': result['strengths'],
-                'mistakes': result['mistakes'],
-                'improvement_suggestions': result['improvement_suggestions'],
-                'detailed_feedback': result['detailed_feedback']
+                'final_score': float(result.get('final_score', result.get('score', 0))),
+                'strengths': result.get('strengths', []),
+                'mistakes': result.get('mistakes', []),
+                'improvement_suggestions': result.get('improvement_suggestions', []),
+                'detailed_feedback': result.get('detailed_feedback', result.get('quick_feedback', 'No feedback provided'))
             }
         except Exception as e:
             print(f"Error in detailed evaluation: {e}")
+            print(f"Response was: {response.get('response', 'No response')}")
             return {
                 'final_score': 0.0,
                 'strengths': [],
@@ -118,29 +141,37 @@ Provide a quick evaluation in the following JSON format:
 
 Respond ONLY with valid JSON, no additional text."""
     
+    
     def _build_detailed_prompt(self, question_text, answer_text, rubric_text):
         """Build prompt for detailed evaluation."""
-        return f"""You are an expert exam evaluator. Provide a comprehensive evaluation of the student's answer.
+        return f"""You are an exam evaluator. Evaluate the student's answer based on the question and rubric.
 
 QUESTION:
 {question_text}
 
-RUBRIC/MARKING SCHEME:
+RUBRIC:
 {rubric_text}
 
-STUDENT'S ANSWER:
+STUDENT ANSWER:
 {answer_text}
 
-Provide a detailed evaluation in the following JSON format:
+Provide your evaluation in valid JSON format with these fields:
+- final_score: (number 0-100)
+- detailed_feedback: (string)
+- strengths: (list of strings)
+- mistakes: (list of strings)
+- improvement_suggestions: (list of strings)
+
+Example JSON:
 {{
-    "final_score": <number between 0-100>,
-    "strengths": ["<strength 1>", "<strength 2>", ...],
-    "mistakes": ["<mistake 1>", "<mistake 2>", ...],
-    "improvement_suggestions": ["<suggestion 1>", "<suggestion 2>", ...],
-    "detailed_feedback": "<comprehensive feedback paragraph>"
+    "final_score": 85,
+    "detailed_feedback": "Good answer but missing some details.",
+    "strengths": ["Clear writing", "Correct dates"],
+    "mistakes": ["Missed one key point"],
+    "improvement_suggestions": ["Elaborate more on the impact"]
 }}
 
-Respond ONLY with valid JSON, no additional text."""
+Respond ONLY with the JSON."""
 
 
 # Singleton instance

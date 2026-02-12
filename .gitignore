@@ -73,3 +73,4 @@ build/
 # Misc
 *.bak
 *.tmp
+*/media/*
