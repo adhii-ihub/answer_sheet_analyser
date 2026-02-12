@@ -35,7 +35,6 @@ function AnimatedCounter({
         const tick = (now: number) => {
             const elapsed = now - start;
             const progress = Math.min(elapsed / duration, 1);
-            // Ease out cubic
             const eased = 1 - Math.pow(1 - progress, 3);
             setDisplay(Math.round(from + (value - from) * eased));
 
@@ -72,11 +71,11 @@ export function StatCard({
         <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay, ease: "easeOut" }}
+            transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
         >
             <Card
                 className={cn(
-                    "glass-card border-0 rounded-2xl hover:shadow-lg transition-shadow duration-300",
+                    "glass-card glass-card-hover border-0 rounded-2xl cursor-default",
                     className
                 )}
             >
@@ -90,20 +89,22 @@ export function StatCard({
                             {trend && (
                                 <p
                                     className={cn(
-                                        "text-xs font-medium",
+                                        "text-xs font-medium flex items-center gap-1",
                                         trend.positive
                                             ? "text-emerald-600 dark:text-emerald-400"
                                             : "text-red-500 dark:text-red-400"
                                     )}
                                 >
-                                    {trend.positive ? "↑" : "↓"} {Math.abs(trend.value)}% from
-                                    last week
+                                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-current/10 text-[10px]">
+                                        {trend.positive ? "↑" : "↓"}
+                                    </span>
+                                    {Math.abs(trend.value)}% from last week
                                 </p>
                             )}
                         </div>
                         <div
                             className={cn(
-                                "flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10",
+                                "flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/8 shadow-inner",
                                 iconColor
                             )}
                         >

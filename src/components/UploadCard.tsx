@@ -1,140 +1,150 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Upload, FileText, Image, X } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Upload, X, FileText, Image } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 interface UploadCardProps {
     label: string;
     description: string;
-    accept?: string;
     file: File | null;
     onFileSelect: (file: File | null) => void;
+    accept?: string;
 }
 
 export function UploadCard({
     label,
     description,
-    accept = ".pdf,.png,.jpg,.jpeg,.gif,.webp",
     file,
     onFileSelect,
+    accept = ".pdf,.png,.jpg,.jpeg",
 }: UploadCardProps) {
+    const inputRef = useRef<HTMLInputElement>(null);
     const [isDragging, setIsDragging] = useState(false);
+
+    const handleDrop = useCallback(
+        (e: React.DragEvent) => {
+            e.preventDefault();
+            setIsDragging(false);
+            const droppedFile = e.dataTransfer.files?.[0];
+            if (droppedFile) onFileSelect(droppedFile);
+        },
+        [onFileSelect]
+    );
 
     const handleDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(true);
     }, []);
 
-    const handleDragLeave = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
+    const handleDragLeave = useCallback(() => {
         setIsDragging(false);
     }, []);
 
-    const handleDrop = useCallback(
-        (e: React.DragEvent) => {
-            e.preventDefault();
-            setIsDragging(false);
-            const droppedFile = e.dataTransfer.files[0];
-            if (droppedFile) onFileSelect(droppedFile);
-        },
-        [onFileSelect]
-    );
+    const handleClick = () => {
+        inputRef.current?.click();
+    };
 
-    const handleChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const selected = e.target.files?.[0];
-            if (selected) onFileSelect(selected);
-        },
-        [onFileSelect]
-    );
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = e.target.files?.[0];
+        if (selectedFile) onFileSelect(selectedFile);
+    };
 
-    const fileIcon = file?.type.startsWith("image/") ? Image : FileText;
-    const FileIcon = fileIcon;
+    const formatSize = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    };
+
+    const isPdf = file?.name.endsWith(".pdf");
 
     return (
-        <Card
-            className={cn(
-                "glass-card border-0 rounded-2xl transition-all duration-300 cursor-pointer group",
-                isDragging && "ring-2 ring-primary/50 scale-[1.02]",
-                file && "ring-1 ring-emerald-500/30"
-            )}
-        >
-            <CardContent className="p-0">
-                <label
-                    className="block p-6 cursor-pointer"
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                >
-                    <input
-                        type="file"
-                        accept={accept}
-                        onChange={handleChange}
-                        className="hidden"
-                    />
+        <Card className="glass-card glass-card-hover border-0 rounded-2xl overflow-hidden">
+            <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">{label}</CardTitle>
+            </CardHeader>
+            <CardContent className="pb-5">
+                <input
+                    ref={inputRef}
+                    type="file"
+                    accept={accept}
+                    onChange={handleChange}
+                    className="hidden"
+                />
 
-                    {file ? (
+                {!file ? (
+                    <motion.div
+                        onDrop={handleDrop}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onClick={handleClick}
+                        animate={{
+                            scale: isDragging ? 1.02 : 1,
+                            borderColor: isDragging
+                                ? "oklch(0.55 0.22 265)"
+                                : "oklch(0.5 0 0 / 15%)",
+                        }}
+                        className={cn(
+                            "relative flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-8 cursor-pointer transition-colors group",
+                            isDragging
+                                ? "bg-primary/5"
+                                : "hover:bg-muted/40 hover:border-primary/30"
+                        )}
+                    >
                         <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="flex items-center gap-4"
+                            animate={{
+                                y: isDragging ? -6 : 0,
+                                scale: isDragging ? 1.15 : 1,
+                            }}
+                            transition={{ type: "spring", stiffness: 300 }}
+                            className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/8 group-hover:bg-primary/12 transition-colors"
                         >
-                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/30">
-                                <FileIcon className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{file.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onFileSelect(null);
-                                }}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                            >
-                                <X className="h-4 w-4" />
-                            </button>
+                            <Upload className="h-5 w-5 text-primary" />
                         </motion.div>
-                    ) : (
-                        <div className="flex flex-col items-center gap-3 py-4">
-                            <motion.div
-                                className={cn(
-                                    "flex h-14 w-14 items-center justify-center rounded-2xl transition-colors",
-                                    isDragging
-                                        ? "bg-primary/20"
-                                        : "bg-muted group-hover:bg-primary/10"
-                                )}
-                                animate={isDragging ? { scale: 1.1 } : { scale: 1 }}
-                            >
-                                <Upload
-                                    className={cn(
-                                        "h-6 w-6 transition-colors",
-                                        isDragging
-                                            ? "text-primary"
-                                            : "text-muted-foreground group-hover:text-primary"
-                                    )}
-                                />
-                            </motion.div>
-                            <div className="text-center">
-                                <p className="text-sm font-medium">{label}</p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    {description}
-                                </p>
-                            </div>
-                            <p className="text-xs text-muted-foreground/60">
-                                Drag & drop or click to browse
+                        <div className="text-center">
+                            <p className="text-sm font-medium">
+                                {isDragging ? "Drop file here" : "Drop or click to upload"}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                {description}
                             </p>
                         </div>
-                    )}
-                </label>
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="relative flex items-center gap-3 rounded-2xl bg-muted/30 p-4"
+                    >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 shrink-0">
+                            {isPdf ? (
+                                <FileText className="h-5 w-5 text-primary" />
+                            ) : (
+                                <Image className="h-5 w-5 text-primary" />
+                            )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{file.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                                {formatSize(file.size)}
+                            </p>
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onFileSelect(null);
+                            }}
+                        >
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </motion.div>
+                )}
             </CardContent>
         </Card>
     );
