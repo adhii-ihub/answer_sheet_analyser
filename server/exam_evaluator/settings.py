@@ -143,19 +143,16 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 CORS_ALLOW_CREDENTIALS = True
 
-# Celery settings
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'UTC'
 
 # Ollama settings
 OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
-PHI3_MODEL = 'phi3:mini'
-LLAMA3_MODEL = 'llama3:8b'
+PHI3_MODEL = 'phi3:latest'
+LLAMA3_MODEL = 'llama3:latest'
 
 # File upload settings
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
+
+# Tesseract OCR settings
+TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
+

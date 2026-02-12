@@ -9,6 +9,10 @@ from pdf2image import convert_from_path
 from PyPDF2 import PdfReader
 from django.conf import settings
 
+# Configure Tesseract executable path
+pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
+
+
 
 def extract_text_from_pdf(pdf_path):
     """

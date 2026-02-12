@@ -14,7 +14,8 @@ from .serializers import (
     SubmissionCreateSerializer,
     SubmissionListSerializer
 )
-from .tasks import process_submission_files
+from .utils.ocr import extract_text_from_file
+from .utils.ai_service import ai_service
 
 
 class UploadView(generics.CreateAPIView):
@@ -33,8 +34,7 @@ Upload question paper, answer sheet, and rubric files for AI evaluation.
 **Workflow:**
 1. Upload three files (PDF or images)
 2. System extracts text using OCR
-3. phi3:mini provides quick scoring (synchronous)
-4. llama3:8b provides detailed feedback (asynchronous)
+3. AI evaluates and provides scoring and feedback (synchronous)
 
 **Supported formats:** PDF, PNG, JPG, JPEG  
 **Max file size:** 10MB per file
@@ -77,8 +77,42 @@ Upload question paper, answer sheet, and rubric files for AI evaluation.
         # Create submission
         submission = serializer.save(user=request.user)
         
-        # Trigger async processing
-        process_submission_files.delay(submission.id)
+        try:
+            # Extract text from files synchronously
+            submission.status = 'processing'
+            submission.save()
+            
+            submission.question_text = extract_text_from_file(submission.question_file.path)
+            submission.answer_text = extract_text_from_file(submission.answer_file.path)
+            submission.rubric_text = extract_text_from_file(submission.rubric_file.path)
+            submission.save()
+            
+            # Perform AI evaluation synchronously
+            result = ai_service.evaluate(
+                submission.question_text,
+                submission.answer_text,
+                submission.rubric_text
+            )
+            
+            # Create evaluation record
+            Evaluation.objects.create(
+                submission=submission,
+                quick_score=result.get('score', 0),
+                quick_feedback=result.get('feedback', ''),
+                final_score=result.get('score', 0),
+                feedback_json=result
+            )
+            
+            submission.status = 'complete'
+            submission.save()
+            
+        except Exception as e:
+            submission.status = 'failed'
+            submission.save()
+            return Response(
+                {'error': f'Processing failed: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         
         # Return submission details
         response_serializer = SubmissionSerializer(submission)
