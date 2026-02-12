@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SpotlightCard } from "@/components/SpotlightCard";
 import { cn } from "@/lib/utils";
 import { type ReactNode } from "react";
 
@@ -22,25 +22,20 @@ export function ChartCard({
 }: ChartCardProps) {
     return (
         <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: 30, scale: 0.95 }}
+            whileInView={{ opacity: 1, y: 0, scale: 1 }}
             viewport={{ once: true, margin: "-50px" }}
-            transition={{ duration: 0.6, delay, ease: "easeOut" }}
+            transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
         >
-            <Card
-                className={cn(
-                    "glass-card border-0 rounded-2xl overflow-hidden",
-                    className
-                )}
-            >
-                <CardHeader className="pb-2">
-                    <CardTitle className="text-base font-semibold">{title}</CardTitle>
+            <SpotlightCard className={cn("p-6", className)}>
+                <div className="mb-6 relative z-10">
+                    <h3 className="text-lg font-bold tracking-tight">{title}</h3>
                     {description && (
-                        <p className="text-sm text-muted-foreground">{description}</p>
+                        <p className="text-sm text-muted-foreground mt-1 font-medium opacity-80">{description}</p>
                     )}
-                </CardHeader>
-                <CardContent className="pt-0">{children}</CardContent>
-            </Card>
+                </div>
+                <div className="relative z-10">{children}</div>
+            </SpotlightCard>
         </motion.div>
     );
 }
