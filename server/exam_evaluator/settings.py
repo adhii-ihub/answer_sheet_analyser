@@ -144,17 +144,12 @@ CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000'
 CORS_ALLOW_CREDENTIALS = True
 
 
-# Ollama settings
-OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
-PHI3_MODEL = 'tinyllama'
-LLAMA3_MODEL = 'tinyllama'
+# Gemini settings
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 # File upload settings
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
-
-# Tesseract OCR settings
-TESSERACT_CMD = os.getenv('TESSERACT_CMD', r'C:\Program Files\Tesseract-OCR\tesseract.exe')
 
 
 # Swagger/OpenAPI settings

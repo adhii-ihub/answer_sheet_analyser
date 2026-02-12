@@ -42,14 +42,23 @@ class SubmissionCreateSerializer(serializers.ModelSerializer):
     
     def validate(self, attrs):
         """Validate file uploads."""
-        from .utils.ocr import validate_file_upload
+        from django.conf import settings
+        import os
         
-        try:
-            validate_file_upload(attrs['question_file'])
-            validate_file_upload(attrs['answer_file'])
-            validate_file_upload(attrs['rubric_file'])
-        except ValueError as e:
-            raise serializers.ValidationError(str(e))
+        allowed_extensions = getattr(settings, 'ALLOWED_EXTENSIONS', ['pdf', 'png', 'jpg', 'jpeg'])
+        
+        for field in ['question_file', 'answer_file', 'rubric_file']:
+            file = attrs.get(field)
+            if file:
+                ext = os.path.splitext(file.name)[1][1:].lower()
+                if ext not in allowed_extensions:
+                    raise serializers.ValidationError(
+                        f"Invalid file type for {field}. Allowed: {allowed_extensions}"
+                    )
+                if file.size > getattr(settings, 'MAX_UPLOAD_SIZE', 10485760):
+                    raise serializers.ValidationError(
+                        f"File {field} is too large. Max size: 10MB"
+                    )
         
         return attrs
 
