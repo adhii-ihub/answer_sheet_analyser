@@ -14,8 +14,8 @@ class GeminiService:
             print("❌ GEMINI_API_KEY is not set in environment or settings!")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-flash-2.0')
-        print(f"⚡ Gemini Service initialized using gemini-flash-latest")
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        print(f"⚡ Gemini Service initialized using gemini-2.5-flash")
 
     def evaluate(self, question_path, answer_path, rubric_path):
         """
