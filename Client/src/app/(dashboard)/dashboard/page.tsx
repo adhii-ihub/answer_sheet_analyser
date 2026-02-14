@@ -42,9 +42,12 @@ const mockDashboard: DashboardData = {
             status: "complete",
             quick_score: 85,
             final_score: 82,
+            max_score: 100,
             feedback: "Good work",
             strengths: [],
             weaknesses: [],
+            improvement_suggestions: [],
+            confidence: 0.95,
             created_at: "2026-02-12T10:30:00Z",
             updated_at: "2026-02-12T10:45:00Z",
         },
@@ -54,9 +57,12 @@ const mockDashboard: DashboardData = {
             status: "processing_final",
             quick_score: 72,
             final_score: null,
+            max_score: null,
             feedback: null,
             strengths: [],
             weaknesses: [],
+            improvement_suggestions: [],
+            confidence: null,
             created_at: "2026-02-11T14:20:00Z",
             updated_at: "2026-02-11T14:25:00Z",
         },
@@ -66,9 +72,12 @@ const mockDashboard: DashboardData = {
             status: "complete",
             quick_score: 91,
             final_score: 88,
+            max_score: 100,
             feedback: "Excellent",
             strengths: [],
             weaknesses: [],
+            improvement_suggestions: [],
+            confidence: 0.9,
             created_at: "2026-02-10T09:15:00Z",
             updated_at: "2026-02-10T09:30:00Z",
         },
@@ -78,9 +87,12 @@ const mockDashboard: DashboardData = {
             status: "complete",
             quick_score: 78,
             final_score: 81,
+            max_score: 100,
             feedback: "Good argumentation",
             strengths: [],
             weaknesses: [],
+            improvement_suggestions: [],
+            confidence: 0.88,
             created_at: "2026-02-09T16:45:00Z",
             updated_at: "2026-02-09T17:00:00Z",
         },
@@ -90,9 +102,12 @@ const mockDashboard: DashboardData = {
             status: "quick_done",
             quick_score: 67,
             final_score: null,
+            max_score: null,
             feedback: null,
             strengths: [],
             weaknesses: [],
+            improvement_suggestions: [],
+            confidence: null,
             created_at: "2026-02-08T11:00:00Z",
             updated_at: "2026-02-08T11:15:00Z",
         },
@@ -279,7 +294,7 @@ export default function DashboardPage() {
                     <p className="text-sm font-semibold mb-0.5">Pro Tip</p>
                     <p className="text-xs text-muted-foreground leading-relaxed">
                         Upload rubrics alongside your answer sheets for the most accurate AI grading.
-                        Our llama3 model uses the rubric to provide detailed, criteria-aligned feedback
+                        Our Gemini model uses the rubric to provide detailed, criteria-aligned feedback
                         with specific improvement suggestions.
                     </p>
                 </div>

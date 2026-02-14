@@ -15,8 +15,14 @@ export function formatDate(date: string | Date): string {
   }).format(new Date(date))
 }
 
-export function formatScore(score: number | null | undefined): string {
+export function formatScore(score: number | null | undefined, maxScore?: number | null): string {
   if (score === null || score === undefined) return "—"
+
+  if (maxScore) {
+    const percentage = Math.round((score / maxScore) * 100)
+    return `${percentage}%`
+  }
+
   return `${Math.round(score)}%`
 }
 

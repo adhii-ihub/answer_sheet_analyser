@@ -46,7 +46,7 @@ def test_upload():
         }
         
         response = requests.post(
-            f"{BASE_URL}/api/upload/",
+            f"{BASE_URL}/ap/upload/",
             headers=headers,
             files=files
         )

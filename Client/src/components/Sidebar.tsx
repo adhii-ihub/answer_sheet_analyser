@@ -21,7 +21,6 @@ import {
     Upload,
     History,
     BarChart3,
-    Settings,
     LogOut,
     Menu,
     User,
@@ -33,7 +32,6 @@ const navItems = [
     { href: "/upload", label: "Upload", icon: Upload },
     { href: "/history", label: "History", icon: History },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
-    { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function NavContent({ onClose }: { onClose?: () => void }) {
@@ -137,13 +135,13 @@ function NavContent({ onClose }: { onClose?: () => void }) {
                         <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 p-[2px]">
                             <div className="h-full w-full rounded-full bg-background flex items-center justify-center">
                                 <span className="font-bold text-sm bg-gradient-to-br from-indigo-500 to-purple-500 bg-clip-text text-transparent">
-                                    {user?.name?.charAt(0)?.toUpperCase() || "U"}
+                                    {user?.username?.charAt(0)?.toUpperCase() || "U"}
                                 </span>
                             </div>
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold truncate">
-                                {user?.name || "User"}
+                                {user?.username || "User"}
                             </p>
                             <p className="text-xs text-muted-foreground truncate opacity-70">
                                 {user?.email || "user@evalai.dev"}

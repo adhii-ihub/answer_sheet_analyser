@@ -16,7 +16,7 @@ import {
 
 interface User {
     id: number;
-    name: string;
+    username: string;
     email: string;
 }
 
@@ -25,7 +25,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     isLoading: boolean;
     login: (email: string, password: string) => Promise<void>;
-    register: (name: string, email: string, password: string) => Promise<void>;
+    register: (name: string, email: string, password: string, confirmPassword?: string) => Promise<void>;
     logout: () => void;
 }
 
@@ -68,8 +68,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleAuthResponse = useCallback(
         (data: AuthResponse) => {
-            localStorage.setItem("access_token", data.access);
-            localStorage.setItem("refresh_token", data.refresh);
+            localStorage.setItem("access_token", data.tokens.access);
+            localStorage.setItem("refresh_token", data.tokens.refresh);
             localStorage.setItem("user", JSON.stringify(data.user));
             setUser(data.user);
             router.push("/dashboard");
@@ -86,8 +86,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     const register = useCallback(
-        async (name: string, email: string, password: string) => {
-            const data = await apiRegister(name, email, password);
+        async (name: string, email: string, password: string, confirmPassword?: string) => {
+            const data = await apiRegister(name, email, password, confirmPassword);
             handleAuthResponse(data);
         },
         [handleAuthResponse]

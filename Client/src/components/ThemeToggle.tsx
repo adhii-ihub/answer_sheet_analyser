@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,23 @@ import { motion, AnimatePresence } from "framer-motion";
 
 export function ThemeToggle() {
     const { theme, setTheme } = useTheme();
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => setMounted(true), []);
+
+    // Render a placeholder during SSR to avoid hydration mismatch
+    if (!mounted) {
+        return (
+            <Button
+                variant="ghost"
+                size="icon"
+                className="relative h-9 w-9 rounded-xl"
+            >
+                <span className="h-4 w-4" />
+                <span className="sr-only">Toggle theme</span>
+            </Button>
+        );
+    }
 
     return (
         <Button

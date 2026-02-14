@@ -92,7 +92,18 @@ class Evaluation(models.Model):
     @property
     def detailed_feedback(self):
         """Get detailed feedback from feedback JSON."""
-        return self.feedback_json.get('detailed_feedback', '')
+        # Gemini returns 'feedback', not 'detailed_feedback'
+        return self.feedback_json.get('feedback', '') or self.feedback_json.get('detailed_feedback', '')
+    
+    @property
+    def max_score(self):
+        """Get max possible score from feedback JSON."""
+        return self.feedback_json.get('max_score', None)
+    
+    @property
+    def confidence(self):
+        """Get confidence score from feedback JSON."""
+        return self.feedback_json.get('confidence', None)
     
     class Meta:
         db_table = 'evaluations'

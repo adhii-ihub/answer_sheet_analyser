@@ -39,7 +39,7 @@ interface SubmissionTableProps {
 }
 
 export function SubmissionTable({
-    submissions,
+    submissions = [],
     totalCount,
     currentPage,
     onPageChange,
@@ -91,8 +91,7 @@ export function SubmissionTable({
                         <TableHeader>
                             <TableRow className="hover:bg-transparent">
                                 <SortableHeader field="file_name">File Name</SortableHeader>
-                                <SortableHeader field="quick_score">Quick Score</SortableHeader>
-                                <SortableHeader field="final_score">Final Score</SortableHeader>
+                                <SortableHeader field="final_score">Score</SortableHeader>
                                 <TableHead>Status</TableHead>
                                 <SortableHeader field="created_at">Date</SortableHeader>
                                 <TableHead className="w-12">View</TableHead>
@@ -122,12 +121,7 @@ export function SubmissionTable({
                                         </TableCell>
                                         <TableCell>
                                             <span className="tabular-nums font-medium">
-                                                {formatScore(sub.quick_score)}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className="tabular-nums font-medium">
-                                                {formatScore(sub.final_score)}
+                                                {formatScore(sub.final_score, sub.max_score)}
                                             </span>
                                         </TableCell>
                                         <TableCell>
@@ -204,89 +198,130 @@ export function SubmissionTable({
                 open={!!selectedSubmission}
                 onOpenChange={() => setSelectedSubmission(null)}
             >
-                <DialogContent className="max-w-lg rounded-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="text-lg">
-                            {selectedSubmission?.file_name}
+                <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col gap-0 p-0 overflow-hidden rounded-2xl bg-background/95 backdrop-blur-md border border-border shadow-2xl">
+                    <DialogHeader className="p-6 pb-2 shrink-0 bg-background/80 backdrop-blur-md z-10 sticky top-0 border-b border-border/10">
+                        <DialogTitle className="text-xl flex items-center gap-2">
+                            <span className="truncate">{selectedSubmission?.file_name}</span>
+                            {selectedSubmission && (
+                                <StatusBadge status={selectedSubmission.status as SubmissionStatus} />
+                            )}
                         </DialogTitle>
                     </DialogHeader>
+
                     {selectedSubmission && (
-                        <div className="space-y-4 pt-2">
+                        <div className="overflow-y-auto p-6 pt-4 space-y-6">
+                            {/* Score & Confidence */}
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="rounded-xl bg-muted/50 p-3">
-                                    <p className="text-xs text-muted-foreground mb-1">
-                                        Quick Score
+                                <div className="rounded-xl bg-muted/50 p-4 border border-border/50">
+                                    <p className="text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wider">
+                                        Total Score
                                     </p>
-                                    <p className="text-2xl font-bold">
-                                        {formatScore(selectedSubmission.quick_score)}
-                                    </p>
+                                    <div>
+                                        <p className="text-3xl font-bold tracking-tight">
+                                            {formatScore(selectedSubmission.final_score, selectedSubmission.max_score)}
+                                        </p>
+                                        {selectedSubmission.final_score !== null && selectedSubmission.max_score && (
+                                            <p className="text-sm text-muted-foreground mt-1 font-medium">
+                                                {selectedSubmission.final_score} / {selectedSubmission.max_score} points
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="rounded-xl bg-muted/50 p-3">
-                                    <p className="text-xs text-muted-foreground mb-1">
-                                        Final Score
-                                    </p>
-                                    <p className="text-2xl font-bold">
-                                        {formatScore(selectedSubmission.final_score)}
-                                    </p>
-                                </div>
+                                {selectedSubmission.confidence !== null && (
+                                    <div className="rounded-xl bg-muted/50 p-4 border border-border/50">
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                                                Reading Confidence
+                                            </p>
+                                        </div>
+                                        <p className="text-3xl font-bold tracking-tight">
+                                            {Math.round(selectedSubmission.confidence * 100)}%
+                                        </p>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            AI certainty in handwriting analysis
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
-                            <div>
-                                <p className="text-sm font-medium mb-2">Status</p>
-                                <StatusBadge
-                                    status={selectedSubmission.status as SubmissionStatus}
-                                />
-                            </div>
-
-                            <div>
-                                <p className="text-sm font-medium mb-2">Date</p>
-                                <p className="text-sm text-muted-foreground">
+                            <div className="flex items-center gap-6 text-sm text-muted-foreground border-y border-border/50 py-3">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-medium text-foreground">Date:</span>
                                     {formatDate(selectedSubmission.created_at)}
-                                </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-medium text-foreground">ID:</span>
+                                    #{selectedSubmission.id}
+                                </div>
                             </div>
 
                             {selectedSubmission.feedback && (
                                 <div>
-                                    <p className="text-sm font-medium mb-2">Feedback</p>
-                                    <p className="text-sm text-muted-foreground leading-relaxed rounded-xl bg-muted/50 p-3">
+                                    <h4 className="text-sm font-bold mb-3 flex items-center gap-2">
+                                        📝 Detailed Feedback
+                                    </h4>
+                                    <div className="text-sm text-muted-foreground leading-relaxed rounded-xl bg-muted/30 p-4 border border-border/50 whitespace-pre-line">
                                         {selectedSubmission.feedback}
-                                    </p>
+                                    </div>
                                 </div>
                             )}
 
-                            {selectedSubmission.strengths &&
-                                selectedSubmission.strengths.length > 0 && (
-                                    <div>
-                                        <p className="text-sm font-medium mb-2">Strengths</p>
-                                        <div className="flex flex-wrap gap-1.5">
+                            <div className="grid md:grid-cols-2 gap-6">
+                                {selectedSubmission.strengths && selectedSubmission.strengths.length > 0 && (
+                                    <div className="space-y-3">
+                                        <h4 className="text-sm font-bold flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                                            ✅ Strengths
+                                        </h4>
+                                        <div className="space-y-2">
                                             {selectedSubmission.strengths.map((s, i) => (
-                                                <span
+                                                <div
                                                     key={i}
-                                                    className="inline-flex rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-0.5 text-xs"
+                                                    className="text-sm text-foreground/80 rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10 px-3 py-2.5 border border-emerald-100 dark:border-emerald-900/20"
                                                 >
                                                     {s}
-                                                </span>
+                                                </div>
                                             ))}
                                         </div>
                                     </div>
                                 )}
 
-                            {selectedSubmission.weaknesses &&
-                                selectedSubmission.weaknesses.length > 0 && (
-                                    <div>
-                                        <p className="text-sm font-medium mb-2">Weaknesses</p>
-                                        <div className="flex flex-wrap gap-1.5">
+                                {selectedSubmission.weaknesses && selectedSubmission.weaknesses.length > 0 && (
+                                    <div className="space-y-3">
+                                        <h4 className="text-sm font-bold flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                                            ⚠️ Areas for Improvement
+                                        </h4>
+                                        <div className="space-y-2">
                                             {selectedSubmission.weaknesses.map((w, i) => (
-                                                <span
+                                                <div
                                                     key={i}
-                                                    className="inline-flex rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 px-2.5 py-0.5 text-xs"
+                                                    className="text-sm text-foreground/80 rounded-lg bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2.5 border border-amber-100 dark:border-amber-900/20"
                                                 >
                                                     {w}
-                                                </span>
+                                                </div>
                                             ))}
                                         </div>
                                     </div>
                                 )}
+                            </div>
+
+                            {selectedSubmission.improvement_suggestions && selectedSubmission.improvement_suggestions.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold mb-3 flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                                        💡 Suggestions for Improvement
+                                    </h4>
+                                    <div className="grid md:grid-cols-2 gap-3">
+                                        {selectedSubmission.improvement_suggestions.map((s, i) => (
+                                            <div
+                                                key={i}
+                                                className="text-sm text-foreground/80 rounded-lg bg-blue-50/50 dark:bg-blue-900/10 px-3 py-3 border border-blue-100 dark:border-blue-900/20 flex gap-3"
+                                            >
+                                                <span className="text-blue-500 font-bold shrink-0">{i + 1}.</span>
+                                                {s}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </DialogContent>

@@ -26,7 +26,7 @@ def test_api():
     print("2. Testing login...")
     try:
         login_data = {
-            "username": "admin",
+            "email": "admin@example.com",
             "password": "admin123"
         }
         response = requests.post(

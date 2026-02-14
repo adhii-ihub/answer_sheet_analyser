@@ -40,7 +40,7 @@ export function RecentActivity({ items }: RecentActivityProps) {
                         </div>
                     </div>
                 ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                         {items.map((item, i) => (
                             <motion.div
                                 key={item.id}
@@ -61,6 +61,17 @@ export function RecentActivity({ items }: RecentActivityProps) {
                                         {formatRelativeTime(item.created_at)}
                                     </p>
                                 </div>
+
+                                {item.status === 'complete' && item.final_score !== null && (
+                                    <div className="text-right mr-2">
+                                        <p className="text-sm font-bold text-foreground">
+                                            {Math.round((item.final_score / (item.max_score || 100)) * 100)}%
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground">
+                                            {item.final_score}/{item.max_score || 100}
+                                        </p>
+                                    </div>
+                                )}
 
                                 <StatusBadge status={item.status as SubmissionStatus} />
                             </motion.div>

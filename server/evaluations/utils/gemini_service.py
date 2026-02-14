@@ -23,11 +23,20 @@ class GeminiService:
         Accepts file paths for question, answer, and rubric.
         """
         try:
-            # Load images
-            # Gemini 1.5 flash handles images well. We don't need to read text purely.
-            question_img = Image.open(question_path)
-            answer_img = Image.open(answer_path)
-            rubric_img = Image.open(rubric_path)
+            # Prepare files (handle PDF vs Image)
+            inputs = []
+            
+            # Helper to load file
+            def load_file(path, label):
+                if path.lower().endswith('.pdf'):
+                    print(f"📄 Uploading {label} as PDF...")
+                    return genai.upload_file(path, mime_type='application/pdf')
+                else:
+                    return Image.open(path)
+
+            question_file = load_file(question_path, "Question Paper")
+            answer_file = load_file(answer_path, "Answer Sheet")
+            rubric_file = load_file(rubric_path, "Rubric")
             
             prompt = self._build_evaluation_prompt()
             
@@ -36,13 +45,14 @@ class GeminiService:
             print("📤 Sending request to Gemini...")
             
             response = self.model.generate_content([
-                "Here is the Question Paper:", question_img,
-                "Here is the Marking Rubric:", rubric_img,
-                "Here is the Student's Answer Sheet:", answer_img,
+                "Here is the Question Paper:", question_file,
+                "Here is the Marking Rubric:", rubric_file,
+                "Here is the Student's Answer Sheet:", answer_file,
                 prompt
             ])
             
             # Parse JSON from response
+            print(f"📥 Gemini Response: {response.text}")
             return self._parse_sresponse(response.text)
             
         except Exception as e:
@@ -115,3 +125,5 @@ class GeminiService:
 
 # Singleton instance
 gemini_service = GeminiService()
+
+# Trigger server reload after package upgrade

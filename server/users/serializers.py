@@ -14,6 +14,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     )
     password2 = serializers.CharField(write_only=True, required=True)
     
+    username = serializers.CharField(required=False)
+
     class Meta:
         model = User
         fields = ('username', 'email', 'password', 'password2')
@@ -27,6 +29,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         validated_data.pop('password2')
+        if 'username' not in validated_data:
+            validated_data['username'] = validated_data['email']
         user = User.objects.create_user(**validated_data)
         return user
 
@@ -41,5 +45,5 @@ class UserSerializer(serializers.ModelSerializer):
 
 class LoginSerializer(serializers.Serializer):
     """Serializer for user login."""
-    username = serializers.CharField(required=True)
+    email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, write_only=True)

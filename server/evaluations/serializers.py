@@ -8,14 +8,16 @@ class EvaluationSerializer(serializers.ModelSerializer):
     mistakes = serializers.ReadOnlyField()
     improvement_suggestions = serializers.ReadOnlyField()
     detailed_feedback = serializers.ReadOnlyField()
+    max_score = serializers.ReadOnlyField()
+    confidence = serializers.ReadOnlyField()
     
     class Meta:
         model = Evaluation
         fields = [
             'id', 'quick_score', 'quick_feedback',
-            'final_score', 'strengths', 'mistakes',
+            'final_score', 'max_score', 'strengths', 'mistakes',
             'improvement_suggestions', 'detailed_feedback',
-            'created_at', 'updated_at'
+            'confidence', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
 
@@ -65,15 +67,31 @@ class SubmissionCreateSerializer(serializers.ModelSerializer):
 
 class SubmissionListSerializer(serializers.ModelSerializer):
     """Simplified serializer for listing submissions."""
+    file_name = serializers.SerializerMethodField()
     quick_score = serializers.SerializerMethodField()
     final_score = serializers.SerializerMethodField()
+    max_score = serializers.SerializerMethodField()
+    feedback = serializers.SerializerMethodField()
+    strengths = serializers.SerializerMethodField()
+    weaknesses = serializers.SerializerMethodField()
+    improvement_suggestions = serializers.SerializerMethodField()
+    confidence = serializers.SerializerMethodField()
     
     class Meta:
         model = Submission
         fields = [
-            'id', 'status', 'quick_score', 'final_score',
+            'id', 'file_name', 'status', 'quick_score', 'final_score',
+            'max_score', 'feedback', 'strengths', 'weaknesses',
+            'improvement_suggestions', 'confidence',
             'created_at', 'updated_at'
         ]
+    
+    def get_file_name(self, obj):
+        """Get file name from answer_file."""
+        import os
+        if obj.answer_file:
+            return os.path.basename(obj.answer_file.name)
+        return f"Submission #{obj.id}"
     
     def get_quick_score(self, obj):
         """Get quick score from evaluation if exists."""
@@ -86,5 +104,47 @@ class SubmissionListSerializer(serializers.ModelSerializer):
         """Get final score from evaluation if exists."""
         try:
             return obj.evaluation.final_score
+        except Evaluation.DoesNotExist:
+            return None
+    
+    def get_feedback(self, obj):
+        """Get detailed feedback from evaluation if exists."""
+        try:
+            return obj.evaluation.detailed_feedback or obj.evaluation.quick_feedback or None
+        except Evaluation.DoesNotExist:
+            return None
+    
+    def get_strengths(self, obj):
+        """Get strengths from evaluation if exists."""
+        try:
+            return obj.evaluation.strengths or []
+        except Evaluation.DoesNotExist:
+            return []
+    
+    def get_weaknesses(self, obj):
+        """Get weaknesses (mistakes) from evaluation if exists."""
+        try:
+            return obj.evaluation.mistakes or []
+        except Evaluation.DoesNotExist:
+            return []
+    
+    def get_max_score(self, obj):
+        """Get max possible score from evaluation if exists."""
+        try:
+            return obj.evaluation.max_score
+        except Evaluation.DoesNotExist:
+            return None
+    
+    def get_improvement_suggestions(self, obj):
+        """Get improvement suggestions from evaluation if exists."""
+        try:
+            return obj.evaluation.improvement_suggestions or []
+        except Evaluation.DoesNotExist:
+            return []
+    
+    def get_confidence(self, obj):
+        """Get confidence score from evaluation if exists."""
+        try:
+            return obj.evaluation.confidence
         except Evaluation.DoesNotExist:
             return None

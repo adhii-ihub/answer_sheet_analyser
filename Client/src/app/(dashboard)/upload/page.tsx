@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { UploadCard } from "@/components/UploadCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { uploadSubmission, getSubmission, type Submission } from "@/lib/api";
-import { formatRelativeTime, type SubmissionStatus } from "@/lib/utils";
+import { formatRelativeTime, formatScore, type SubmissionStatus } from "@/lib/utils";
 import { Send, Loader2, CheckCircle2, FileText } from "lucide-react";
 
 export default function UploadPage() {
@@ -65,9 +65,9 @@ export default function UploadPage() {
 
         try {
             const formData = new FormData();
-            formData.append("question_paper", questionPaper);
-            formData.append("answer_sheet", answerSheet);
-            formData.append("rubric", rubric);
+            formData.append("question_file", questionPaper);
+            formData.append("answer_file", answerSheet);
+            formData.append("rubric_file", rubric);
 
             const result = await uploadSubmission(formData);
             setUploadProgress(100);
@@ -94,9 +94,12 @@ export default function UploadPage() {
                 status: "uploading",
                 quick_score: null,
                 final_score: null,
+                max_score: null,
                 feedback: null,
                 strengths: [],
                 weaknesses: [],
+                improvement_suggestions: [],
+                confidence: null,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             };
@@ -119,7 +122,6 @@ export default function UploadPage() {
                             ? {
                                 ...prev,
                                 status: statuses[idx],
-                                quick_score: idx >= 1 ? 82 : null,
                                 final_score: idx >= 3 ? 79 : null,
                                 feedback:
                                     idx >= 3
@@ -258,42 +260,43 @@ export default function UploadPage() {
                                 </p>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                {/* Score display */}
+                                {/* Score & Confidence */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="rounded-xl bg-muted/50 p-4">
                                         <p className="text-xs text-muted-foreground mb-1">
-                                            Quick Score
+                                            Score
                                         </p>
                                         <AnimatePresence mode="wait">
-                                            <motion.p
-                                                key={submission.quick_score ?? "pending"}
-                                                initial={{ opacity: 0 }}
-                                                animate={{ opacity: 1 }}
-                                                className="text-2xl font-bold"
-                                            >
-                                                {submission.quick_score !== null
-                                                    ? `${submission.quick_score}%`
-                                                    : "—"}
-                                            </motion.p>
-                                        </AnimatePresence>
-                                    </div>
-                                    <div className="rounded-xl bg-muted/50 p-4">
-                                        <p className="text-xs text-muted-foreground mb-1">
-                                            Final Score
-                                        </p>
-                                        <AnimatePresence mode="wait">
-                                            <motion.p
+                                            <motion.div
                                                 key={submission.final_score ?? "pending"}
                                                 initial={{ opacity: 0 }}
                                                 animate={{ opacity: 1 }}
-                                                className="text-2xl font-bold"
                                             >
-                                                {submission.final_score !== null
-                                                    ? `${submission.final_score}%`
-                                                    : "—"}
-                                            </motion.p>
+                                                <p className="text-2xl font-bold">
+                                                    {submission.final_score !== null
+                                                        ? formatScore(submission.final_score, submission.max_score)
+                                                        : "—"}
+                                                </p>
+                                                {submission.final_score !== null && submission.max_score && (
+                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                        {submission.final_score} / {submission.max_score} points
+                                                    </p>
+                                                )}
+                                            </motion.div>
                                         </AnimatePresence>
                                     </div>
+                                    {submission.confidence !== null && (
+                                        <div className="rounded-xl bg-muted/50 p-4">
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                                <p className="text-xs text-muted-foreground">
+                                                    Reading Confidence
+                                                </p>
+                                            </div>
+                                            <p className="text-2xl font-bold">
+                                                {Math.round(submission.confidence * 100)}%
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Status Progress */}
@@ -350,9 +353,72 @@ export default function UploadPage() {
                                                 Evaluation Complete
                                             </p>
                                         </div>
-                                        <p className="text-sm text-muted-foreground leading-relaxed">
+                                        <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
                                             {submission.feedback}
                                         </p>
+                                    </motion.div>
+                                )}
+
+                                {/* Strengths */}
+                                {submission.strengths && submission.strengths.length > 0 && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.1 }}
+                                    >
+                                        <p className="text-sm font-medium mb-2">✅ Strengths</p>
+                                        <div className="space-y-1.5">
+                                            {submission.strengths.map((s, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="text-sm text-muted-foreground rounded-lg bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2 border border-emerald-200/30 dark:border-emerald-800/30"
+                                                >
+                                                    {s}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+
+                                {/* Weaknesses */}
+                                {submission.weaknesses && submission.weaknesses.length > 0 && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.2 }}
+                                    >
+                                        <p className="text-sm font-medium mb-2">⚠️ Areas for Improvement</p>
+                                        <div className="space-y-1.5">
+                                            {submission.weaknesses.map((w, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="text-sm text-muted-foreground rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2 border border-amber-200/30 dark:border-amber-800/30"
+                                                >
+                                                    {w}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+
+                                {/* Improvement Suggestions */}
+                                {submission.improvement_suggestions && submission.improvement_suggestions.length > 0 && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.3 }}
+                                    >
+                                        <p className="text-sm font-medium mb-2">💡 Suggestions</p>
+                                        <div className="space-y-1.5">
+                                            {submission.improvement_suggestions.map((s, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="text-sm text-muted-foreground rounded-lg bg-blue-50 dark:bg-blue-900/20 px-3 py-2 border border-blue-200/30 dark:border-blue-800/30"
+                                                >
+                                                    {s}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </motion.div>
                                 )}
                             </CardContent>

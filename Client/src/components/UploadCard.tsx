@@ -81,11 +81,8 @@ export function UploadCard({
 
                 <AnimatePresence mode="wait">
                     {!file ? (
-                        <motion.div
+                        <div
                             key="dropzone"
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
                             onDrop={handleDrop}
                             onDragOver={handleDragOver}
                             onDragLeave={handleDragLeave}
@@ -93,23 +90,20 @@ export function UploadCard({
                             className={cn(
                                 "relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-8 cursor-pointer transition-all duration-300 group hover:border-primary/50",
                                 isDragging
-                                    ? "bg-primary/10 border-primary"
+                                    ? "bg-primary/10 border-primary scale-[1.02]"
                                     : "border-white/10 hover:bg-white/5"
                             )}
                         >
                             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl" />
 
-                            <motion.div
-                                animate={{
-                                    y: isDragging ? -8 : 0,
-                                    scale: isDragging ? 1.1 : 1,
-                                    rotate: isDragging ? [0, -5, 5, 0] : 0
-                                }}
-                                transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                                className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 shadow-lg ring-1 ring-white/20 group-hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] transition-shadow"
+                            <div
+                                className={cn(
+                                    "flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 shadow-lg ring-1 ring-white/20 group-hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] transition-all duration-300",
+                                    isDragging && "-translate-y-2 scale-110"
+                                )}
                             >
                                 <Upload className="h-7 w-7 text-primary drop-shadow-lg" />
-                            </motion.div>
+                            </div>
 
                             <div className="text-center relative z-10">
                                 <p className="text-sm font-semibold group-hover:text-primary transition-colors">
@@ -119,7 +113,7 @@ export function UploadCard({
                                     {description}
                                 </p>
                             </div>
-                        </motion.div>
+                        </div>
                     ) : (
                         <motion.div
                             key="preview"

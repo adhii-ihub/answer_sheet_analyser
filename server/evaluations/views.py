@@ -236,31 +236,12 @@ Get comprehensive analytics for the authenticated user.
         # Calculate analytics
         total_submissions = submissions.count()
         
-        # Average scores
-        avg_quick_score = submissions.aggregate(
-            avg=Avg('evaluation__quick_score')
-        )['avg'] or 0
+        # Calculate averages and distribution based on percentages
+        total_quick_pct = 0
+        total_final_pct = 0
+        valid_quick_count = 0
+        valid_final_count = 0
         
-        avg_final_score = submissions.aggregate(
-            avg=Avg('evaluation__final_score')
-        )['avg'] or 0
-        
-        # Score timeline (last 30 days)
-        thirty_days_ago = timezone.now() - timedelta(days=30)
-        recent_submissions = submissions.filter(
-            created_at__gte=thirty_days_ago
-        ).order_by('created_at')
-        
-        score_timeline = [
-            {
-                'date': sub.created_at.strftime('%Y-%m-%d'),
-                'quick_score': sub.evaluation.quick_score,
-                'final_score': sub.evaluation.final_score
-            }
-            for sub in recent_submissions
-        ]
-        
-        # Performance distribution
         score_ranges = {
             '0-20': 0,
             '21-40': 0,
@@ -270,17 +251,58 @@ Get comprehensive analytics for the authenticated user.
         }
         
         for sub in submissions:
-            score = sub.evaluation.final_score or 0
-            if score <= 20:
-                score_ranges['0-20'] += 1
-            elif score <= 40:
-                score_ranges['21-40'] += 1
-            elif score <= 60:
-                score_ranges['41-60'] += 1
-            elif score <= 80:
-                score_ranges['61-80'] += 1
-            else:
-                score_ranges['81-100'] += 1
+            try:
+                max_score = sub.evaluation.feedback_json.get('max_score', 100)
+                if max_score <= 0: max_score = 100
+                
+                # Quick Score
+                q_score = sub.evaluation.quick_score
+                if q_score is not None:
+                    q_pct = (q_score / max_score) * 100
+                    total_quick_pct += q_pct
+                    valid_quick_count += 1
+                
+                # Final Score
+                f_score = sub.evaluation.final_score
+                if f_score is not None:
+                    f_pct = (f_score / max_score) * 100
+                    total_final_pct += f_pct
+                    valid_final_count += 1
+                    
+                    # Distribution
+                    if f_pct <= 20: score_ranges['0-20'] += 1
+                    elif f_pct <= 40: score_ranges['21-40'] += 1
+                    elif f_pct <= 60: score_ranges['41-60'] += 1
+                    elif f_pct <= 80: score_ranges['61-80'] += 1
+                    else: score_ranges['81-100'] += 1
+            except Exception:
+                continue
+                
+        avg_quick_score = (total_quick_pct / valid_quick_count) if valid_quick_count > 0 else 0
+        avg_final_score = (total_final_pct / valid_final_count) if valid_final_count > 0 else 0
+        
+        # Score timeline (last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        recent_submissions = submissions.filter(
+            created_at__gte=thirty_days_ago
+        ).order_by('created_at')
+        
+        score_timeline = []
+        for sub in recent_submissions:
+            try:
+                max_score = sub.evaluation.feedback_json.get('max_score', 100) or 100
+                q_score = sub.evaluation.quick_score
+                f_score = sub.evaluation.final_score
+                
+                item = {'date': sub.created_at.strftime('%Y-%m-%d')}
+                if q_score is not None:
+                    item['quick_score'] = round((q_score / max_score) * 100, 1)
+                if f_score is not None:
+                    item['final_score'] = round((f_score / max_score) * 100, 1)
+                
+                score_timeline.append(item)
+            except Exception:
+                continue
         
         # Strengths vs Weaknesses
         total_strengths = 0
@@ -352,20 +374,34 @@ Get dashboard summary for the authenticated user.
         # Total uploads
         total_uploads = Submission.objects.filter(user=user).count()
         
-        # Average score
+        # Average score (calculated as percentage)
         completed_submissions = Submission.objects.filter(
             user=user,
             status='complete'
         ).select_related('evaluation')
         
-        avg_score = completed_submissions.aggregate(
-            avg=Avg('evaluation__final_score')
-        )['avg'] or 0
+        total_score_sum = 0
+        count = 0
         
-        # Recent submissions (last 5)
+        for sub in completed_submissions:
+            try:
+                # Get max score from JSON or default to 100
+                max_score = sub.evaluation.feedback_json.get('max_score', 100)
+                final_score = sub.evaluation.final_score or 0
+                
+                if max_score > 0:
+                    percentage = (final_score / max_score) * 100
+                    total_score_sum += percentage
+                    count += 1
+            except Exception:
+                continue
+                
+        avg_score = (total_score_sum / count) if count > 0 else 0
+        
+        # Recent submissions (last 10)
         recent_submissions = Submission.objects.filter(
             user=user
-        ).select_related('evaluation').order_by('-created_at')[:5]
+        ).select_related('evaluation').order_by('-created_at')[:10]
         
         recent_data = SubmissionListSerializer(recent_submissions, many=True).data
         
@@ -377,7 +413,7 @@ Get dashboard summary for the authenticated user.
         
         return Response({
             'total_uploads': total_uploads,
-            'average_score': round(avg_score, 2),
+            'average_score': round(avg_score, 0),
             'recent_submissions': recent_data,
             'pending_evaluations': pending_count
         })
