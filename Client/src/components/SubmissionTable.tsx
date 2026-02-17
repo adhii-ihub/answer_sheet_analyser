@@ -90,6 +90,8 @@ export function SubmissionTable({
                     <Table>
                         <TableHeader>
                             <TableRow className="hover:bg-transparent">
+                                <SortableHeader field="student_name">Student</SortableHeader>
+                                <SortableHeader field="exam_name">Exam</SortableHeader>
                                 <SortableHeader field="file_name">File Name</SortableHeader>
                                 <SortableHeader field="final_score">Score</SortableHeader>
                                 <TableHead>Status</TableHead>
@@ -100,7 +102,7 @@ export function SubmissionTable({
                         <TableBody>
                             {submissions.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center py-12">
+                                    <TableCell colSpan={8} className="text-center py-12">
                                         <p className="text-sm text-muted-foreground">
                                             No submissions found
                                         </p>
@@ -116,7 +118,13 @@ export function SubmissionTable({
                                         className="group border-b border-border/50 hover:bg-accent/30 cursor-pointer transition-colors"
                                         onClick={() => setSelectedSubmission(sub)}
                                     >
-                                        <TableCell className="font-medium max-w-[200px] truncate">
+                                        <TableCell className="font-medium">
+                                            {sub.student_name || "Unknown"}
+                                        </TableCell>
+                                        <TableCell className="text-sm text-muted-foreground">
+                                            {sub.exam_name || "N/A"}
+                                        </TableCell>
+                                        <TableCell className="font-medium max-w-[200px] truncate text-muted-foreground">
                                             {sub.file_name}
                                         </TableCell>
                                         <TableCell>
@@ -231,27 +239,39 @@ export function SubmissionTable({
                                     <div className="rounded-xl bg-muted/50 p-4 border border-border/50">
                                         <div className="flex items-center gap-1.5 mb-1">
                                             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                                                Reading Confidence
+                                                Handwriting Clarity
                                             </p>
                                         </div>
                                         <p className="text-3xl font-bold tracking-tight">
                                             {Math.round(selectedSubmission.confidence * 100)}%
                                         </p>
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            AI certainty in handwriting analysis
+                                            Legibility Score
                                         </p>
                                     </div>
                                 )}
                             </div>
 
-                            <div className="flex items-center gap-6 text-sm text-muted-foreground border-y border-border/50 py-3">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-medium text-foreground">Date:</span>
-                                    {formatDate(selectedSubmission.created_at)}
+                            <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground border-y border-border/50 py-3">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-foreground">Student:</span>
+                                        {selectedSubmission.student_name || "Unknown"}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-foreground">Exam:</span>
+                                        {selectedSubmission.exam_name || "N/A"}
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="font-medium text-foreground">ID:</span>
-                                    #{selectedSubmission.id}
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-foreground">Date:</span>
+                                        {formatDate(selectedSubmission.created_at)}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-foreground">ID:</span>
+                                        #{selectedSubmission.id}
+                                    </div>
                                 </div>
                             </div>
 

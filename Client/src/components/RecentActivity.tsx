@@ -58,6 +58,7 @@ export function RecentActivity({ items }: RecentActivityProps) {
                                         {item.file_name}
                                     </p>
                                     <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">
+                                        {item.student_name ? `${item.student_name} • ` : ""}
                                         {formatRelativeTime(item.created_at)}
                                     </p>
                                 </div>

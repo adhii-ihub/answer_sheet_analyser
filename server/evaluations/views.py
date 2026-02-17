@@ -8,13 +8,34 @@ from django.utils import timezone
 from datetime import timedelta
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import Submission, Evaluation
+from .models import Submission, Evaluation, Exam
 from .serializers import (
     SubmissionSerializer, 
     SubmissionCreateSerializer,
-    SubmissionListSerializer
+    SubmissionSerializer, 
+    SubmissionCreateSerializer,
+    SubmissionListSerializer,
+    ExamSerializer
 )
 from .utils.gemini_service import gemini_service
+from django.shortcuts import get_object_or_404
+from rest_framework import viewsets
+
+
+class ExamViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing Exams.
+    GET /api/exams
+    POST /api/exams
+    """
+    permission_classes = (IsAuthenticated,)
+    serializer_class = ExamSerializer
+    
+    def get_queryset(self):
+        return Exam.objects.filter(created_by=self.request.user).order_by('-created_at')
+    
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 
 class UploadView(generics.CreateAPIView):
@@ -58,9 +79,9 @@ Upload question paper, answer sheet, and rubric files for AI evaluation.
             openapi.Parameter(
                 'rubric_file',
                 openapi.IN_FORM,
-                description="Rubric/marking scheme file (PDF or image)",
+                description="Rubric/marking scheme file (PDF or image) - Optional",
                 type=openapi.TYPE_FILE,
-                required=True
+                required=False
             ),
         ],
         responses={
@@ -73,25 +94,65 @@ Upload question paper, answer sheet, and rubric files for AI evaluation.
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Create submission
+        # Handle Exam Logic
+        exam_id = serializer.validated_data.get('exam_id')
+        exam_name = serializer.validated_data.get('exam_name') or f"Exam {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+        
         submission = serializer.save(user=request.user)
         
+        # Link or Create Exam
+        current_exam = None
+        if exam_id:
+            current_exam = get_object_or_404(Exam, id=exam_id, created_by=request.user)
+            submission.exam = current_exam
+        elif serializer.validated_data.get('question_file'):
+            # Create new Exam Context
+            current_exam = Exam.objects.create(
+                name=exam_name,
+                question_file=serializer.validated_data['question_file'],
+                rubric_file=serializer.validated_data.get('rubric_file'),
+                created_by=request.user
+            )
+            submission.exam = current_exam
+            
         try:
             # Update status
             submission.status = 'processing'
             submission.save()
             
-            # Placeholder for text fields since we use multimodal Gemini
+            # Placeholder for text fields
             submission.question_text = "Processed by Gemini Multimodal"
             submission.answer_text = "Processed by Gemini Multimodal"
             submission.rubric_text = "Processed by Gemini Multimodal"
             submission.save()
             
             # Perform AI evaluation using Gemini
+            # Determine paths - fallback to Exam files if not in submission
+            
+            # Question Path
+            question_path = None
+            if submission.question_file:
+                question_path = submission.question_file.path
+            elif current_exam and current_exam.question_file:
+                question_path = current_exam.question_file.path
+                
+            if not question_path:
+                raise ValueError("No Question Paper found in submission or exam context.")
+
+            # Answer Path
+            answer_path = submission.answer_file.path
+            
+            # Rubric Path
+            rubric_path = None
+            if submission.rubric_file:
+                rubric_path = submission.rubric_file.path
+            elif current_exam and current_exam.rubric_file:
+                rubric_path = current_exam.rubric_file.path
+            
             result = gemini_service.evaluate(
-                submission.question_file.path,
-                submission.answer_file.path,
-                submission.rubric_file.path
+                question_path,
+                answer_path,
+                rubric_path
             )
             
             # Create evaluation record
@@ -102,9 +163,6 @@ Upload question paper, answer sheet, and rubric files for AI evaluation.
                 final_score=result.get('score', 0),
                 feedback_json=result
             )
-            
-            submission.status = 'complete'
-            submission.save()
             
             submission.status = 'complete'
             submission.save()

@@ -113,7 +113,29 @@ export interface Submission {
     confidence: number | null;
     created_at: string;
     updated_at: string;
+    exam: number | null;
+    exam_name?: string;
+    student_name?: string;
 }
+
+export interface Exam {
+    id: number;
+    name: string;
+    subject: string;
+    created_at: string;
+}
+
+export async function getExams(): Promise<Exam[]> {
+    return apiClient<Exam[]>("/exams/");
+}
+
+export async function createExam(formData: FormData): Promise<Exam> {
+    return apiClient<Exam>("/exams/", {
+        method: "POST",
+        body: formData,
+    });
+}
+
 
 export async function uploadSubmission(formData: FormData): Promise<Submission> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -136,6 +158,9 @@ export async function uploadSubmission(formData: FormData): Promise<Submission> 
         confidence: ev.confidence ?? raw.confidence ?? null,
         created_at: raw.created_at,
         updated_at: raw.updated_at,
+        exam: raw.exam ?? null,
+        exam_name: raw.exam_name,
+        student_name: raw.student_name,
     };
 }
 
@@ -176,6 +201,9 @@ export async function getHistory(params?: {
         confidence: s.confidence ?? null,
         created_at: s.created_at,
         updated_at: s.updated_at,
+        exam: s.exam ?? null,
+        exam_name: s.exam_name,
+        student_name: s.student_name,
     });
 
     // Handle both flat array (no pagination) and paginated response
@@ -205,6 +233,9 @@ export async function getSubmission(id: number): Promise<Submission> {
         confidence: ev.confidence ?? raw.confidence ?? null,
         created_at: raw.created_at,
         updated_at: raw.updated_at,
+        exam: raw.exam ?? null,
+        exam_name: raw.exam_name,
+        student_name: raw.student_name,
     };
 }
 
@@ -235,6 +266,9 @@ export async function getDashboard(): Promise<DashboardData> {
             weaknesses: s.weaknesses || [],
             created_at: s.created_at,
             updated_at: s.updated_at,
+            exam: s.exam ?? null,
+            exam_name: s.exam_name,
+            student_name: s.student_name,
         })
     );
 

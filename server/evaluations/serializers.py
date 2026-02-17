@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Submission, Evaluation
+from .models import Submission, Evaluation, Exam
 
 
 class EvaluationSerializer(serializers.ModelSerializer):
@@ -25,28 +25,58 @@ class EvaluationSerializer(serializers.ModelSerializer):
 class SubmissionSerializer(serializers.ModelSerializer):
     """Serializer for Submission model."""
     evaluation = EvaluationSerializer(read_only=True)
+    exam_name = serializers.CharField(source='exam.name', read_only=True)
     
     class Meta:
         model = Submission
         fields = [
-            'id', 'question_file', 'answer_file', 'rubric_file',
+            'id', 'user', 'exam', 'exam_name', 'student_name', 
+            'question_file', 'answer_file', 'rubric_file', 
             'status', 'created_at', 'updated_at', 'evaluation'
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at', 'evaluation']
 
 
+class ExamSerializer(serializers.ModelSerializer):
+    """Serializer for Exam model."""
+    class Meta:
+        model = Exam
+        fields = ['id', 'name', 'subject', 'question_file', 'rubric_file', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
 class SubmissionCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new submissions."""
+    exam_id = serializers.IntegerField(required=False, write_only=True)
+    exam_name = serializers.CharField(required=False, write_only=True)
     
     class Meta:
         model = Submission
-        fields = ['question_file', 'answer_file', 'rubric_file']
+        fields = ['question_file', 'answer_file', 'rubric_file', 'student_name', 'exam_id', 'exam_name']
+        extra_kwargs = {
+            'question_file': {'required': False},
+            'rubric_file': {'required': False, 'allow_null': True},
+            'answer_file': {'required': True},
+            'student_name': {'required': False}
+        }
     
     def validate(self, attrs):
-        """Validate file uploads."""
+        """Validate file uploads and exam context."""
         from django.conf import settings
         import os
         
+        exam_id = attrs.get('exam_id')
+        question_file = attrs.get('question_file')
+        answer_file = attrs.get('answer_file')
+        rubric_file = attrs.get('rubric_file')
+        
+        # Validation Logic:
+        # 1. If exam_id PROVIDED: Question/Rubric files are OPTIONAL (ignored if present).
+        # 2. If exam_id MISSING: Question file is REQUIRED. Rubric is OPTIONAL.
+        
+        if not exam_id and not question_file:
+            raise serializers.ValidationError("Question paper is required when creating a new exam context.")
+            
         allowed_extensions = getattr(settings, 'ALLOWED_EXTENSIONS', ['pdf', 'png', 'jpg', 'jpeg'])
         
         for field in ['question_file', 'answer_file', 'rubric_file']:
@@ -57,12 +87,20 @@ class SubmissionCreateSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         f"Invalid file type for {field}. Allowed: {allowed_extensions}"
                     )
-                if file.size > getattr(settings, 'MAX_UPLOAD_SIZE', 10485760):
+                if file.size > getattr(settings, 'MAX_UPLOAD_SIZE', 52428800):
                     raise serializers.ValidationError(
-                        f"File {field} is too large. Max size: 10MB"
+                        f"File {field} is too large. Max size: 50MB"
                     )
         
         return attrs
+
+    def create(self, validated_data):
+        """
+        Create Submission instance, removing virtual fields that are not part of the model.
+        """
+        validated_data.pop('exam_id', None)
+        validated_data.pop('exam_name', None)
+        return super().create(validated_data)
 
 
 class SubmissionListSerializer(serializers.ModelSerializer):
@@ -77,13 +115,15 @@ class SubmissionListSerializer(serializers.ModelSerializer):
     improvement_suggestions = serializers.SerializerMethodField()
     confidence = serializers.SerializerMethodField()
     
+    exam_name = serializers.CharField(source='exam.name', read_only=True)
+    
     class Meta:
         model = Submission
         fields = [
             'id', 'file_name', 'status', 'quick_score', 'final_score',
             'max_score', 'feedback', 'strengths', 'weaknesses',
             'improvement_suggestions', 'confidence',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'exam', 'exam_name', 'student_name'
         ]
     
     def get_file_name(self, obj):

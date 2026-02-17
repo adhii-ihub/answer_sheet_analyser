@@ -34,22 +34,26 @@ class GeminiService:
                 else:
                     return Image.open(path)
 
+
+            
             question_file = load_file(question_path, "Question Paper")
             answer_file = load_file(answer_path, "Answer Sheet")
-            rubric_file = load_file(rubric_path, "Rubric")
             
-            prompt = self._build_evaluation_prompt()
+            rubric_file = None
+            if rubric_path:
+                rubric_file = load_file(rubric_path, "Rubric")
             
-            # Send to Gemini: [prompt, question_image, rubric_image, answer_image]
-            # Order matters: Context (Question/Rubric) -> Target (Answer) -> Instructions
+            prompt = self._build_evaluation_prompt(has_rubric=bool(rubric_file))
+            
+            # Send to Gemini: [prompt, question_image, rubric_image (optional), answer_image]
             print("📤 Sending request to Gemini...")
             
-            response = self.model.generate_content([
-                "Here is the Question Paper:", question_file,
-                "Here is the Marking Rubric:", rubric_file,
-                "Here is the Student's Answer Sheet:", answer_file,
-                prompt
-            ])
+            inputs = ["Here is the Question Paper:", question_file]
+            if rubric_file:
+                inputs.extend(["Here is the Marking Rubric:", rubric_file])
+            inputs.extend(["Here is the Student's Answer Sheet:", answer_file, prompt])
+
+            response = self.model.generate_content(inputs)
             
             # Parse JSON from response
             print(f"📥 Gemini Response: {response.text}")
@@ -67,28 +71,31 @@ class GeminiService:
                 'confidence': 0.0
             }
 
-    def _build_evaluation_prompt(self):
-        return """
-        You are an expert academic examiner. Your task is to evaluate the student's answer sheet against the provided question paper and marking rubric.
+    def _build_evaluation_prompt(self, has_rubric=True):
+        rubric_instruction = "2. Read the Marking Rubric to understand how marks are assigned." if has_rubric else "2. Evaluate based on standard academic criteria for the subject/level."
+        grading_instruction = "4. Assign a score based STRICTLY on the rubric." if has_rubric else "4. Assign a score based on correctness, completeness, and clarity."
+
+        return f"""
+        You are an expert academic examiner. Your task is to evaluate the student's answer sheet against the provided question paper{' and marking rubric' if has_rubric else ''}.
 
         **Instructions:**
         1. Read the Question Paper to understand what was asked.
-        2. Read the Marking Rubric to understand how marks are assigned.
+        {rubric_instruction}
         3. Evaluate the Student's Answer Sheet carefully.
-        4. Assign a score based STRICTLY on the rubric.
+        {grading_instruction}
         5. Provide constructive feedback.
 
         **Output Format:**
         Provide the result in valid JSON format ONLY, with the following structure:
-        {
+        {{
             "score": <number, marks obtained>,
             "max_score": <number, total marks possible for these questions>,
             "strengths": ["<point 1>", "<point 2>", ...],
             "mistakes": ["<point 1>", "<point 2>", ...],
             "improvement_suggestions": ["<point 1>", ...],
             "feedback": "<detailed feedback paragraph>",
-            "confidence": <number between 0 and 1, indicating your confidence in reading the handwriting>
-        }
+            "confidence": <number between 0 and 1, representing the handwriting clarity/legibility score>
+        }}
         
         IMPORTANT: Respond ONLY with VALID JSON. Do not add markdown formatting ```json ... ```.
         """

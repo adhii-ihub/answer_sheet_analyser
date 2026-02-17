@@ -5,10 +5,40 @@ import json
 User = get_user_model()
 
 
+class Exam(models.Model):
+    """
+    Model to store Exam context (Question Paper + Rubric).
+    Allows reuse of these files for multiple submissions.
+    """
+    name = models.CharField(max_length=255)
+    subject = models.CharField(max_length=100, blank=True)
+    question_file = models.FileField(upload_to='questions/')
+    rubric_file = models.FileField(upload_to='rubrics/', null=True, blank=True)
+    
+    # Extracted text (cached)
+    question_text = models.TextField(blank=True)
+    rubric_text = models.TextField(blank=True)
+    
+    created_by = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='exams'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.name} ({self.subject})"
+    
+    class Meta:
+        db_table = 'exams'
+        ordering = ['-created_at']
+
+
 class Submission(models.Model):
     """
     Model to store exam submission details.
     Each submission contains question paper, answer sheet, and rubric files.
+    Now supports linking to an Exam context.
     """
     STATUS_CHOICES = [
         ('uploading', 'Uploading'),
@@ -23,14 +53,28 @@ class Submission(models.Model):
         on_delete=models.CASCADE, 
         related_name='submissions'
     )
-    question_file = models.FileField(upload_to='questions/')
-    answer_file = models.FileField(upload_to='answers/')
-    rubric_file = models.FileField(upload_to='rubrics/')
     
-    # Extracted text from files
-    question_text = models.TextField(blank=True)
+    # Link to Exam Context (Optional for backward compatibility)
+    exam = models.ForeignKey(
+        Exam,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='submissions'
+    )
+    
+    student_name = models.CharField(max_length=255, default="Unknown Student")
+    
+    # Files
+    # If linked to Exam, question_file and rubric_file can be null
+    question_file = models.FileField(upload_to='questions/', null=True, blank=True)
+    answer_file = models.FileField(upload_to='answers/')
+    rubric_file = models.FileField(upload_to='rubrics/', null=True, blank=True)
+    
+    # Extracted text properties (fallback to Exam if missing)
+    _question_text = models.TextField(blank=True, db_column='question_text')
     answer_text = models.TextField(blank=True)
-    rubric_text = models.TextField(blank=True)
+    _rubric_text = models.TextField(blank=True, db_column='rubric_text')
     
     status = models.CharField(
         max_length=20, 
@@ -41,8 +85,24 @@ class Submission(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    @property
+    def question_text(self):
+        return self._question_text or (self.exam.question_text if self.exam else "")
+        
+    @question_text.setter
+    def question_text(self, value):
+        self._question_text = value
+        
+    @property
+    def rubric_text(self):
+        return self._rubric_text or (self.exam.rubric_text if self.exam else "")
+        
+    @rubric_text.setter
+    def rubric_text(self, value):
+        self._rubric_text = value
+
     def __str__(self):
-        return f"Submission {self.id} by {self.user.username}"
+        return f"Submission {self.id} - {self.student_name}"
     
     class Meta:
         db_table = 'submissions'

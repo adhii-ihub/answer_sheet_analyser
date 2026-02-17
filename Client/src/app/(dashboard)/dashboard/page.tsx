@@ -50,6 +50,8 @@ const mockDashboard: DashboardData = {
             confidence: 0.95,
             created_at: "2026-02-12T10:30:00Z",
             updated_at: "2026-02-12T10:45:00Z",
+            exam: null,
+            student_name: "Alice Smith"
         },
         {
             id: 2,
@@ -65,6 +67,8 @@ const mockDashboard: DashboardData = {
             confidence: null,
             created_at: "2026-02-11T14:20:00Z",
             updated_at: "2026-02-11T14:25:00Z",
+            exam: null,
+            student_name: "Bob Jones"
         },
         {
             id: 3,
@@ -80,6 +84,8 @@ const mockDashboard: DashboardData = {
             confidence: 0.9,
             created_at: "2026-02-10T09:15:00Z",
             updated_at: "2026-02-10T09:30:00Z",
+            exam: null,
+            student_name: "Charlie Brown"
         },
         {
             id: 4,
@@ -95,6 +101,8 @@ const mockDashboard: DashboardData = {
             confidence: 0.88,
             created_at: "2026-02-09T16:45:00Z",
             updated_at: "2026-02-09T17:00:00Z",
+            exam: null,
+            student_name: "David Wilson"
         },
         {
             id: 5,
@@ -110,6 +118,8 @@ const mockDashboard: DashboardData = {
             confidence: null,
             created_at: "2026-02-08T11:00:00Z",
             updated_at: "2026-02-08T11:15:00Z",
+            exam: null,
+            student_name: "Eve Davis"
         },
     ],
 };
