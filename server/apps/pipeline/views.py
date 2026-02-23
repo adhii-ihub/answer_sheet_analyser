@@ -3,12 +3,13 @@ apps/pipeline/views.py
 
 DRF API views for EduGrade AI — Phase 1.
 
-Endpoints:
+Stack: LightNeon OCR 2 (Cloudflare endpoint) + Google Gemini.
 
-    GET  /api/health/            → service health check
-    POST /api/parse-rubrics/     → parse rubric text → structured dict
-    POST /api/ocr/               → run OCR on an uploaded image
-    POST /api/pipeline/          → full end-to-end evaluation (OCR + Gemini)
+Endpoints:
+    GET  /api/health/           → health check
+    POST /api/parse-rubrics/    → parse rubric text
+    POST /api/ocr/              → OCR only (LightNeon OCR 2 + Gemini parsing)
+    POST /api/pipeline/         → full pipeline (OCR + Gemini evaluation)
 """
 
 import logging
@@ -36,18 +37,14 @@ from core.pipeline import run_evaluation_pipeline
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
 def _save_upload_to_temp(uploaded_file) -> str:
-    """Save a Django UploadedFile to a named temp file and return its path.
+    """Save a Django UploadedFile to a temp file and return its path.
 
     Args:
         uploaded_file: InMemoryUploadedFile or TemporaryUploadedFile.
 
     Returns:
-        Absolute path of the saved temp file.
+        Absolute path string of the saved temp file.
     """
     suffix = os.path.splitext(uploaded_file.name)[1] or ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -57,26 +54,19 @@ def _save_upload_to_temp(uploaded_file) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
 
 class HealthView(APIView):
-    """GET /api/health/  →  ``{"status": "ok", "service": "EduGrade AI"}``"""
+    """GET /api/health/"""
 
     def get(self, request: Request) -> Response:
         """Return service health status."""
-        return Response(
-            {"status": "ok", "service": "EduGrade AI"},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"status": "ok", "service": "EduGrade AI"})
 
 
-# ---------------------------------------------------------------------------
-# Parse Rubrics
 # ---------------------------------------------------------------------------
 
 class ParseRubricsView(APIView):
-    """POST /api/parse-rubrics/  →  parse rubric text.
+    """POST /api/parse-rubrics/
 
     Form fields:
         rubrics_text (str): Raw rubric text.
@@ -85,7 +75,7 @@ class ParseRubricsView(APIView):
     parser_classes = [FormParser, MultiPartParser, JSONParser]
 
     def post(self, request: Request) -> Response:
-        """Handle POST — parse rubric text."""
+        """Parse rubric text and return structured dict."""
         rubrics_text: str = (
             request.data.get("rubrics_text") or request.data.get("rubric_text") or ""
         )
@@ -95,99 +85,87 @@ class ParseRubricsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            parsed = parse_rubrics(rubrics_text)
+            return Response({"questions": parse_rubrics(rubrics_text)})
         except RubricParseException as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
-            logger.exception("ParseRubricsView: unexpected error")
-            return Response(
-                {"error": f"Unexpected error: {exc}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-        return Response({"questions": parsed}, status=status.HTTP_200_OK)
+            logger.exception("ParseRubricsView error")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# ---------------------------------------------------------------------------
-# OCR
 # ---------------------------------------------------------------------------
 
 class OcrView(APIView):
-    """POST /api/ocr/  →  extract per-question answers from an image.
+    """POST /api/ocr/
 
-    Form fields:
-        file         (file): The answer-sheet image.
-        question_ids (str):  Comma-separated IDs, e.g. ``"1,2,6a"``.
-        ollama_url   (str, optional)
-        model        (str, optional)
+    Multipart fields:
+        file            (file): Answer-sheet image.
+        question_ids    (str):  Comma-separated IDs, e.g. ``"1,2,6a"``.
         ocr_service_url (str, optional)
-        ocr_api_key  (str, optional)
+        ocr_api_key     (str, optional)
+        gemini_api_key  (str, optional)
+        gemini_model    (str, optional)
     """
 
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request: Request) -> Response:
-        """Handle POST — run OCR on uploaded image."""
+        """Run LightNeon OCR 2 + Gemini parsing on uploaded image."""
         uploaded_file = request.FILES.get("file")
         if not uploaded_file:
             return Response(
-                {"error": "No file uploaded. Send the image as 'file' field."},
+                {"error": "Send the answer-sheet image as 'file' field."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         q_ids_raw: str = request.data.get("question_ids", "")
         if not q_ids_raw.strip():
             return Response(
-                {"error": "question_ids is required (comma-separated, e.g. '1,2,6a')."},
+                {"error": "question_ids is required (comma-separated)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         question_ids = [q.strip() for q in q_ids_raw.split(",") if q.strip()]
 
-        ollama_url: str = request.data.get("ollama_url") or settings.OLLAMA_URL
-        model: str = request.data.get("model") or settings.OLLAMA_OCR_MODEL
-        ocr_service_url: str = request.data.get("ocr_service_url") or settings.OCR_SERVICE_URL
-        ocr_api_key: str = request.data.get("ocr_api_key") or settings.OCR_API_KEY
+        ocr_service_url = request.data.get("ocr_service_url") or settings.OCR_SERVICE_URL
+        ocr_api_key = request.data.get("ocr_api_key") or settings.OCR_API_KEY
+        gemini_api_key = request.data.get("gemini_api_key") or settings.GEMINI_API_KEY
+        gemini_model = request.data.get("gemini_model") or settings.GEMINI_MODEL
 
-        tmp_path: str = _save_upload_to_temp(uploaded_file)
+        tmp_path = _save_upload_to_temp(uploaded_file)
         try:
             answers = extract_answers(
                 image_path=tmp_path,
                 question_ids=question_ids,
-                ollama_url=ollama_url,
-                model=model,
                 ocr_service_url=ocr_service_url,
                 ocr_api_key=ocr_api_key,
+                gemini_api_key=gemini_api_key,
+                gemini_model=gemini_model,
             )
         except OcrException as exc:
             return Response({"error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         except Exception as exc:
-            logger.exception("OcrView: unexpected error")
-            return Response(
-                {"error": f"Unexpected error: {exc}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            logger.exception("OcrView error")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
-        return Response({"answers": answers}, status=status.HTTP_200_OK)
+
+        return Response({"answers": answers})
 
 
-# ---------------------------------------------------------------------------
-# Full Pipeline (OCR + Gemini evaluation)
 # ---------------------------------------------------------------------------
 
 class PipelineView(APIView):
     """POST /api/pipeline/  →  full OCR + Gemini evaluation.
 
-    Form fields:
-        file            (file): The answer-sheet image.
+    Multipart fields:
+        file            (file): Answer-sheet image.
         rubrics_text    (str):  Plain-text rubric.
-        gemini_api_key  (str, optional): Override key from settings.
-        gemini_model    (str, optional): Override Gemini model name.
-        ollama_url      (str, optional): Ollama base URL.
-        ocr_model       (str, optional): Ollama OCR parsing model.
-        ocr_service_url (str, optional): External OCR endpoint.
-        ocr_api_key     (str, optional): External OCR API key.
+        gemini_api_key  (str, optional)
+        gemini_model    (str, optional)
+        ocr_service_url (str, optional)
+        ocr_api_key     (str, optional)
 
     Response 200::
 
@@ -203,14 +181,13 @@ class PipelineView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request: Request) -> Response:
-        """Handle POST — run full OCR + Gemini evaluation pipeline."""
+        """Run the full EduGrade AI pipeline."""
         uploaded_file = request.FILES.get("file")
         if not uploaded_file:
             return Response(
-                {"error": "No file uploaded. Send the image as 'file' field."},
+                {"error": "Send the answer-sheet image as 'file' field."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         rubrics_text: str = (
             request.data.get("rubrics_text") or request.data.get("rubric_text") or ""
         )
@@ -220,35 +197,34 @@ class PipelineView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Config — request overrides take priority over settings
-        gemini_api_key: str = request.data.get("gemini_api_key") or settings.GEMINI_API_KEY
-        gemini_model: str = request.data.get("gemini_model") or settings.GEMINI_MODEL
-        ollama_url: str = request.data.get("ollama_url") or settings.OLLAMA_URL
-        ocr_model: str = request.data.get("ocr_model") or settings.OLLAMA_OCR_MODEL
-        ocr_service_url: str = request.data.get("ocr_service_url") or settings.OCR_SERVICE_URL
-        ocr_api_key: str = request.data.get("ocr_api_key") or settings.OCR_API_KEY
+        gemini_api_key = request.data.get("gemini_api_key") or settings.GEMINI_API_KEY
+        gemini_model = request.data.get("gemini_model") or settings.GEMINI_MODEL
+        ocr_service_url = request.data.get("ocr_service_url") or settings.OCR_SERVICE_URL
+        ocr_api_key = request.data.get("ocr_api_key") or settings.OCR_API_KEY
 
         if not gemini_api_key:
             return Response(
-                {"error": "GEMINI_API_KEY is not set. Add it to your .env file."},
+                {"error": "GEMINI_API_KEY is not configured. Set it in .env."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not ocr_service_url:
+            return Response(
+                {"error": "OCR_SERVICE_URL is not configured. Set it in .env."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         logger.info(
-            "PipelineView: file=%s  gemini_model=%s  ocr_svc=%s",
-            uploaded_file.name, gemini_model,
-            ocr_service_url or "(Ollama multimodal fallback)",
+            "PipelineView: file=%s  model=%s  ocr=%s",
+            uploaded_file.name, gemini_model, ocr_service_url,
         )
 
-        tmp_path: str = _save_upload_to_temp(uploaded_file)
+        tmp_path = _save_upload_to_temp(uploaded_file)
         try:
             result: dict[str, Any] = run_evaluation_pipeline(
                 image_path=tmp_path,
                 rubrics_text=rubrics_text,
                 gemini_api_key=gemini_api_key,
                 gemini_model=gemini_model,
-                ollama_url=ollama_url,
-                ocr_model=ocr_model,
                 ocr_service_url=ocr_service_url,
                 ocr_api_key=ocr_api_key,
             )
@@ -260,15 +236,12 @@ class PipelineView(APIView):
             logger.error("PipelineView: %s", exc)
             return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as exc:
-            logger.exception("PipelineView: unexpected error")
-            return Response(
-                {"error": f"Unexpected error: {exc}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            logger.exception("PipelineView unexpected error")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
 
-        return Response(result, status=status.HTTP_200_OK)
+        return Response(result)
