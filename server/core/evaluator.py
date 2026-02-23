@@ -3,16 +3,18 @@ core/evaluator.py
 
 LLM-based answer evaluator for the EduGrade AI system.
 
-Uses the **Google Gemini API** (via the ``google-generativeai`` SDK) to
+Calls a self-hosted Ollama instance (exposed via Cloudflare / ngrok) to
 evaluate each student answer against the rubric criteria.  Processing is
-strictly sequential (one question at a time) to keep Gemini rate limits safe.
+strictly sequential (one question at a time).
 """
 
+import json
 import logging
+import re
 import time
 from typing import Any
 
-import google.generativeai as genai
+import requests
 
 from core.exceptions import EvaluationException
 
@@ -21,13 +23,29 @@ from core.exceptions import EvaluationException
 # ---------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_json_fences(text: str) -> str:
+    """Remove Markdown JSON code fences from *text* if present.
+
+    Args:
+        text: Raw string that may contain triple-backtick fences.
+
+    Returns:
+        Inner JSON string with fences removed, or *text* unchanged.
+    """
+    stripped = text.strip()
+    m = _JSON_FENCE_RE.match(stripped)
+    return m.group(1).strip() if m else stripped
+
+
 def _clamp(value: int | float, lo: int, hi: int) -> int:
-    """Clamp *value* to the closed interval ``[lo, hi]``.
+    """Clamp *value* to ``[lo, hi]``.
 
     Args:
         value: The numeric value to clamp.
@@ -35,7 +53,7 @@ def _clamp(value: int | float, lo: int, hi: int) -> int:
         hi: Inclusive upper bound.
 
     Returns:
-        An integer within ``[lo, hi]``.
+        Integer within ``[lo, hi]``.
     """
     return max(lo, min(hi, int(round(value))))
 
@@ -109,25 +127,24 @@ def _evaluate_single_question(
     q_number: str,
     rubric: dict[str, Any],
     student_answer: str,
-    gemini_model: genai.GenerativeModel,
+    ollama_url: str,
+    model: str,
 ) -> dict[str, Any]:
-    """Evaluate one question using the Gemini model.
+    """Evaluate one question by calling the Ollama LLM (via Cloudflare URL).
 
     Args:
         q_number: Question identifier string.
         rubric: Rubric dict for this question.
         student_answer: The student's extracted answer text.
-        gemini_model: Configured ``genai.GenerativeModel`` instance.
+        ollama_url: Base URL of the Ollama server (e.g. Cloudflare tunnel URL).
+        model: Ollama model name to use for evaluation.
 
     Returns:
-        Evaluation result dict with marks, justification, confidence, etc.
+        Evaluation result dict.
 
     Raises:
-        EvaluationException: On any Gemini API or JSON parsing failure.
+        EvaluationException: On network, timeout, or JSON parsing failure.
     """
-    import json
-    import re
-
     description = rubric.get("description", "")
     max_marks: int = int(rubric.get("max_marks", 0))
     criteria: list[dict[str, Any]] = rubric.get("criteria", [])
@@ -150,54 +167,72 @@ def _evaluate_single_question(
         q_number, description, max_marks, criteria, student_answer
     )
 
-    logger.info(
-        "evaluator: calling Gemini for Q%s (max_marks=%d, answer_len=%d)",
-        q_number, max_marks, len(student_answer),
-    )
+    endpoint = f"{ollama_url.rstrip('/')}/api/generate"
+    payload: dict = {
+        "model": model,
+        "prompt": prompt,
+        "format": "json",
+        "stream": False,
+    }
+
+    logger.info("evaluator: POST %s  model=%s  question=Q%s", endpoint, model, q_number)
     start_ts = time.monotonic()
     try:
-        response = gemini_model.generate_content(prompt)
-    except Exception as exc:
+        response = requests.post(endpoint, json=payload, timeout=180)
+        response.raise_for_status()
+    except requests.exceptions.Timeout as exc:
         raise EvaluationException(
-            f"Gemini API call failed for Q{q_number}: {exc}",
+            f"Evaluation request for Q{q_number} timed out after 180 s.",
+            original_error=exc,
+        ) from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise EvaluationException(
+            f"Cannot connect to Ollama at '{endpoint}'.",
+            original_error=exc,
+        ) from exc
+    except requests.exceptions.HTTPError as exc:
+        raise EvaluationException(
+            f"Ollama returned HTTP {response.status_code} for Q{q_number}: {response.text[:200]}",
+            original_error=exc,
+        ) from exc
+    except requests.exceptions.RequestException as exc:
+        raise EvaluationException(
+            f"Network error evaluating Q{q_number}: {exc}",
             original_error=exc,
         ) from exc
     finally:
         elapsed = time.monotonic() - start_ts
-        logger.info("evaluator: Q%s Gemini request completed in %.2f s", q_number, elapsed)
+        logger.info("evaluator: Q%s completed in %.2f s", q_number, elapsed)
 
-    # ---- Extract text from response ----------------------------------------
+    # ---- Parse response -----------------------------------------------------
     try:
-        raw_text: str = response.text.strip()
-    except (AttributeError, ValueError) as exc:
+        resp_json = response.json()
+    except ValueError as exc:
         raise EvaluationException(
-            f"Gemini returned no usable text for Q{q_number}: {exc}",
+            f"Ollama response for Q{q_number} is not valid JSON.",
             original_error=exc,
         ) from exc
 
+    raw_text: str = resp_json.get("response", "")
     if not raw_text:
-        raise EvaluationException(f"Gemini returned empty response for Q{q_number}.")
+        raise EvaluationException(f"Ollama returned empty 'response' for Q{q_number}.")
 
-    # Strip markdown JSON fences if present
-    _fence_re = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL | re.IGNORECASE)
-    fence_match = _fence_re.match(raw_text)
-    clean_text = fence_match.group(1).strip() if fence_match else raw_text
+    clean_text = _strip_json_fences(raw_text)
 
-    # ---- Parse JSON ---------------------------------------------------------
     try:
         evaluation: dict = json.loads(clean_text)
     except json.JSONDecodeError as exc:
         raise EvaluationException(
-            f"Gemini response for Q{q_number} is not valid JSON: {clean_text[:200]!r}",
+            f"Model response for Q{q_number} is not valid JSON: {clean_text[:200]!r}",
             original_error=exc,
         ) from exc
 
     if not isinstance(evaluation, dict):
         raise EvaluationException(
-            f"Expected JSON object for Q{q_number}, got {type(evaluation).__name__}."
+            f"Expected a JSON object for Q{q_number}, got {type(evaluation).__name__}."
         )
 
-    # ---- Safe extraction and clamping --------------------------------------
+    # ---- Safe clamping ------------------------------------------------------
     raw_marks = evaluation.get("awarded_marks", 0)
     try:
         awarded = _clamp(raw_marks, 0, max_marks)
@@ -233,52 +268,31 @@ def _evaluate_single_question(
 def evaluate_answers(
     ocr_output: dict[str, str],
     parsed_rubrics: dict[str, Any],
-    gemini_api_key: str,
-    model: str = "gemini-2.0-flash",
+    ollama_url: str,
+    model: str,
 ) -> dict[str, dict[str, Any]]:
-    """Evaluate all student answers against the rubric using Google Gemini.
+    """Evaluate all student answers using the self-hosted Ollama LLM.
 
-    Each question is processed **sequentially** (no parallelism).
+    Calls the Ollama instance at *ollama_url* (your Cloudflare-tunnelled
+    server) sequentially for each question.
 
     Args:
-        ocr_output: Dict of ``{question_id: student_answer_text}``.
-        parsed_rubrics: Dict of ``{question_id: rubric_dict}`` from
-            :func:`core.parser.parse_rubrics`.
-        gemini_api_key: Google Gemini API key.
-        model: Gemini model name. Defaults to ``"gemini-2.0-flash"``.
+        ocr_output: ``{question_id: student_answer_text}`` from OCR step.
+        parsed_rubrics: ``{question_id: rubric_dict}`` from parser step.
+        ollama_url: Base URL of the Ollama server, e.g.
+            ``"https://xxxx.trycloudflare.com"`` or ``"https://xxxx.ngrok-free.app"``.
+        model: Ollama model name to use, e.g. ``"mistral"``, ``"llama3"``.
 
     Returns:
-        Dict of ``{question_id: evaluation_result_dict}``::
-
-            {
-                "1": {
-                    "awarded_marks": 2,
-                    "out_of": 2,
-                    "justification": "...",
-                    "key_points_covered": [...],
-                    "missing_points": [...],
-                    "confidence": "high",
-                },
-                ...
-            }
+        ``{question_id: evaluation_result_dict}``
 
     Raises:
-        EvaluationException: If the API key is missing or any question fails.
+        EvaluationException: If *any* question evaluation fails.
     """
     if not parsed_rubrics:
         raise EvaluationException("parsed_rubrics is empty — nothing to evaluate.")
-    if not gemini_api_key:
-        raise EvaluationException(
-            "gemini_api_key is required. Set GEMINI_API_KEY in your .env file."
-        )
-
-    # Configure Gemini SDK
-    genai.configure(api_key=gemini_api_key)
-    gemini_model = genai.GenerativeModel(model_name=model)
-    logger.info("evaluator: using Gemini model '%s'", model)
 
     results: dict[str, dict[str, Any]] = {}
-
     for q_number, rubric in parsed_rubrics.items():
         student_answer = ocr_output.get(q_number, "")
         logger.info(
@@ -289,7 +303,8 @@ def evaluate_answers(
             q_number=q_number,
             rubric=rubric,
             student_answer=student_answer,
-            gemini_model=gemini_model,
+            ollama_url=ollama_url,
+            model=model,
         )
         results[q_number] = result
 

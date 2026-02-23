@@ -1,12 +1,11 @@
 """
 core/pipeline.py
 
-Top-level orchestration pipeline for the EduGrade AI system.
+Top-level orchestration pipeline for EduGrade AI.
 
-Ties together the parser, OCR extractor (external HTTP service + Ollama),
-and Gemini LLM evaluator into a single callable that returns a fully graded
-result including per-question breakdowns, total marks, percentage, and an
-Anna University letter grade.
+Stack:
+  OCR  → LightNeon OCR 2 (Cloudflare/ngrok endpoint) + Gemini for parsing
+  LLM  → Gemini (evaluation)
 """
 
 import logging
@@ -17,14 +16,7 @@ from core.evaluator import evaluate_answers
 from core.ocr import extract_answers
 from core.parser import parse_rubrics
 
-# ---------------------------------------------------------------------------
-# Module-level logger
-# ---------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Grade scale (Anna University)
-# ---------------------------------------------------------------------------
 
 _GRADE_SCALE: list[tuple[float, str]] = [
     (91.0, "O"),
@@ -37,13 +29,13 @@ _GRADE_SCALE: list[tuple[float, str]] = [
 
 
 def _assign_grade(percentage: float) -> str:
-    """Return the Anna University letter grade for the given percentage.
+    """Map a percentage to an Anna University letter grade.
 
     Args:
-        percentage: Achieved percentage (0.0 – 100.0).
+        percentage: Score percentage (0–100).
 
     Returns:
-        Grade string: ``"O"``, ``"A+"``, ``"A"``, ``"B+"``, ``"B"``, or ``"RA"``.
+        Grade string such as ``"O"``, ``"A+"``, or ``"RA"``.
     """
     for threshold, grade in _GRADE_SCALE:
         if percentage >= threshold:
@@ -51,39 +43,32 @@ def _assign_grade(percentage: float) -> str:
     return "RA"
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 def run_evaluation_pipeline(
     image_path: str,
     rubrics_text: str,
     gemini_api_key: str,
+    ocr_service_url: str,
+    ocr_api_key: str,
     gemini_model: str = "gemini-2.0-flash",
-    ollama_url: str = "http://localhost:11434",
-    ocr_model: str = "mistral",
-    ocr_service_url: str = "",
-    ocr_api_key: str = "",
 ) -> dict[str, Any]:
-    """Run the full EduGrade AI evaluation pipeline end-to-end.
+    """Run the full EduGrade AI evaluation pipeline.
 
     Steps (all sequential):
 
-    1. **Parse rubrics** — convert raw rubric text into a structured dict.
-    2. **Extract answers via OCR** — POST image to the external OCR service
-       (or Ollama multimodal if not set), then parse into per-question JSON.
-    3. **Evaluate with Gemini** — send each answer + rubric to Gemini API.
-    4. **Compute totals & grade** — sum marks, calculate %, assign letter grade.
+    1. Parse rubrics.
+    2. LightNeon OCR 2 → raw text, then Gemini → per-question answers.
+    3. Gemini evaluates each answer against rubric.
+    4. Compute totals, percentage, and Anna University grade.
 
     Args:
         image_path: Path to the answer-sheet image.
-        rubrics_text: Raw plain-text rubric document.
-        gemini_api_key: Google Gemini API key.
+        rubrics_text: Raw rubric document text.
+        gemini_api_key: Google Gemini API key (used for both OCR parsing
+            and evaluation).
+        ocr_service_url: URL of the LightNeon OCR 2 endpoint,
+            e.g. ``"https://xxxx.ngrok-free.app/ocr"``.
+        ocr_api_key: API key for the OCR service.
         gemini_model: Gemini model name. Defaults to ``"gemini-2.0-flash"``.
-        ollama_url: Base Ollama URL (used for OCR answer-parsing step).
-        ocr_model: Ollama text model for parsing OCR output into per-question JSON.
-        ocr_service_url: External HTTP OCR endpoint (e.g. ngrok URL).
-        ocr_api_key: API key for the external OCR service.
 
     Returns:
         ::
@@ -97,74 +82,58 @@ def run_evaluation_pipeline(
             }
 
     Raises:
-        PipelineException: If any step fails.
+        PipelineException: On any failure in any step.
     """
-    logger.info("pipeline: starting EduGrade AI evaluation pipeline.")
-
+    logger.info("pipeline: starting EduGrade AI pipeline.")
     try:
-        # ------------------------------------------------------------------ #
-        # Step 1 — Parse rubrics                                               #
-        # ------------------------------------------------------------------ #
+        # Step 1 — Parse rubrics
         logger.info("pipeline: step 1/4 — parsing rubrics …")
         parsed_rubrics = parse_rubrics(rubrics_text)
-        question_ids: list[str] = list(parsed_rubrics.keys())
-        logger.info(
-            "pipeline: rubrics parsed — %d question(s): %s", len(question_ids), question_ids
-        )
+        question_ids = list(parsed_rubrics.keys())
+        logger.info("pipeline: %d question(s): %s", len(question_ids), question_ids)
 
-        # ------------------------------------------------------------------ #
-        # Step 2 — OCR extraction                                              #
-        # ------------------------------------------------------------------ #
-        logger.info("pipeline: step 2/4 — extracting answers via OCR …")
+        # Step 2 — LightNeon OCR 2 + Gemini answer parsing
+        logger.info("pipeline: step 2/4 — OCR + Gemini answer extraction …")
         ocr_output = extract_answers(
             image_path=image_path,
             question_ids=question_ids,
-            ollama_url=ollama_url,
-            model=ocr_model,
             ocr_service_url=ocr_service_url,
             ocr_api_key=ocr_api_key,
+            gemini_api_key=gemini_api_key,
+            gemini_model=gemini_model,
         )
-        logger.info("pipeline: OCR complete — %d answer(s) extracted.", len(ocr_output))
+        logger.info("pipeline: %d answer(s) extracted.", len(ocr_output))
 
-        # ------------------------------------------------------------------ #
-        # Step 3 — Gemini LLM evaluation                                       #
-        # ------------------------------------------------------------------ #
-        logger.info("pipeline: step 3/4 — evaluating answers with Gemini …")
+        # Step 3 — Gemini evaluation
+        logger.info("pipeline: step 3/4 — Gemini evaluation …")
         question_results = evaluate_answers(
             ocr_output=ocr_output,
             parsed_rubrics=parsed_rubrics,
             gemini_api_key=gemini_api_key,
             model=gemini_model,
         )
-        logger.info("pipeline: evaluation complete — %d result(s).", len(question_results))
+        logger.info("pipeline: %d question(s) evaluated.", len(question_results))
 
-        # ------------------------------------------------------------------ #
-        # Step 4 — Compute totals and grade                                    #
-        # ------------------------------------------------------------------ #
-        logger.info("pipeline: step 4/4 — computing totals and grade …")
-        total_marks: int = 0
-        max_total_marks: int = 0
-
+        # Step 4 — Totals + grade
+        logger.info("pipeline: step 4/4 — computing totals …")
+        total_marks = 0
+        max_total_marks = 0
         for q_number, rubric in parsed_rubrics.items():
-            max_marks: int = int(rubric.get("max_marks", 0))
-            q_result: dict = question_results.get(q_number, {})
-            awarded: int = int(q_result.get("awarded_marks", 0))
+            max_marks = int(rubric.get("max_marks", 0))
+            awarded = int(question_results.get(q_number, {}).get("awarded_marks", 0))
             total_marks += awarded
             max_total_marks += max_marks
 
-        if max_total_marks == 0:
-            logger.warning("pipeline: max_total_marks is 0 — percentage set to 0.0.")
-            percentage = 0.0
-        else:
-            percentage = round((total_marks / max_total_marks) * 100, 2)
-
+        percentage = (
+            round((total_marks / max_total_marks) * 100, 2)
+            if max_total_marks > 0 else 0.0
+        )
         grade = _assign_grade(percentage)
 
         logger.info(
             "pipeline: RESULT — %d/%d (%.2f%%)  grade=%s",
             total_marks, max_total_marks, percentage, grade,
         )
-
         return {
             "total_marks": total_marks,
             "max_total_marks": max_total_marks,
@@ -176,8 +145,7 @@ def run_evaluation_pipeline(
     except PipelineException:
         raise
     except Exception as exc:
-        logger.exception("pipeline: unhandled error — %s: %s", type(exc).__name__, exc)
+        logger.exception("pipeline: unhandled error — %s", exc)
         raise PipelineException(
-            f"Pipeline failed: {type(exc).__name__}: {exc}",
-            original_error=exc,
+            f"Pipeline failed: {type(exc).__name__}: {exc}", original_error=exc
         ) from exc
