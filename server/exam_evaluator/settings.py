@@ -28,7 +28,12 @@ INSTALLED_APPS = [
     
     # Local
     'evaluations',
-    'users',
+    'apps.accounts',
+    'apps.exams',
+    'apps.uploads',
+    'apps.ocr_engine',
+    'apps.segmentation',
+    'apps.evaluator',
 ]
 
 MIDDLEWARE = [
@@ -104,7 +109,7 @@ REST_FRAMEWORK = {
     ),
 }
 
-AUTH_USER_MODEL = 'users.User'
+AUTH_USER_MODEL = 'accounts.Teacher'
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 MAX_UPLOAD_SIZE = 52428800 # 50MB

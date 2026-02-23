@@ -19,7 +19,9 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('evaluations.urls')),
-    path('api/auth/', include('users.urls')),
+    path('api/auth/', include('apps.accounts.urls')),
+    path('api/', include('evaluations.urls')),       # upload, history, dashboard, analytics, exams
+    path('api/', include('apps.uploads.urls')),
+    path('api/', include('apps.exams.urls')),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
