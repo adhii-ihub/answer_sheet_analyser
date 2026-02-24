@@ -14,6 +14,7 @@ Two-step pipeline:
    to its answer excerpt.
 """
 
+
 import json
 import logging
 import re
@@ -117,141 +118,50 @@ def _call_lightneon_ocr(
     return raw
 
 
-def _parse_answers_with_gemini(
-    raw_ocr_text: str,
-    question_ids: list[str],
-    gemini_api_key: str,
-    gemini_model: str,
-) -> dict[str, str]:
-    """Use Gemini to extract per-question answers from raw OCR text.
-
-    Args:
-        raw_ocr_text: Full text from LightNeon OCR.
-        question_ids: List of expected question IDs.
-        gemini_api_key: Google Gemini API key.
-        gemini_model: Gemini model name, e.g. ``"gemini-2.0-flash"``.
-
-    Returns:
-        ``{question_id: answer_text}`` dict.
-
-    Raises:
-        OcrException: On Gemini API or JSON parsing failure.
-    """
-    ids_repr = str(question_ids)
-    example = json.dumps(
-        {qid: "answer text..." for qid in question_ids[:2]}, ensure_ascii=False
-    )
-
-    prompt = (
-        "You are an intelligent text parser for handwritten exam answer sheets.\n"
-        "The following is the full OCR-extracted text from a student's answer sheet:\n\n"
-        f"--- BEGIN OCR TEXT ---\n{raw_ocr_text}\n--- END OCR TEXT ---\n\n"
-        f"Extract the student's answer for each of these question numbers: {ids_repr}\n"
-        "The student has written answers labeled by question number (e.g. '1.', 'Q1', '6a.', etc.).\n"
-        "Return ONLY a valid JSON object with question numbers as keys and the full extracted answer text as values.\n"
-        f"Example: {example}\n"
-        "If a question's answer is not found, use an empty string as the value.\n"
-        "Do not add any explanation outside the JSON."
-    )
-
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel(model_name=gemini_model)
-
-    logger.info("ocr: calling Gemini (%s) to parse OCR text into per-question answers.", gemini_model)
-    start_ts = time.monotonic()
-    try:
-        response = model.generate_content(prompt)
-        raw_text: str = response.text.strip()
-    except Exception as exc:
-        raise OcrException(
-            f"Gemini answer-parsing call failed: {exc}", original_error=exc
-        ) from exc
-    finally:
-        elapsed = time.monotonic() - start_ts
-        logger.info("ocr: Gemini parsing completed in %.2f s", elapsed)
-
-    if not raw_text:
-        raise OcrException("Gemini returned empty response during answer parsing.")
-
-    clean_text = _strip_json_fences(raw_text)
-    try:
-        extracted: dict = json.loads(clean_text)
-    except json.JSONDecodeError as exc:
-        raise OcrException(
-            f"Gemini answer-parsing response is not valid JSON: {clean_text[:200]!r}",
-            original_error=exc,
-        ) from exc
-
-    if not isinstance(extracted, dict):
-        raise OcrException(f"Expected JSON object from Gemini, got {type(extracted).__name__}.")
-
-    return extracted
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def extract_answers(
-    image_path: str,
-    question_ids: list[str],
+    image_paths: list[str],
     ocr_service_url: str,
     ocr_api_key: str,
-    gemini_api_key: str,
-    gemini_model: str = "gemini-2.0-flash",
-) -> dict[str, str]:
-    """Extract handwritten answers using LightNeon OCR 2 + Gemini.
+) -> str:
+    """Extract handwritten answers from multiple images using LightNeon OCR 2.
 
-    **Step 1** — POST image to LightNeon OCR 2 via the Cloudflare/ngrok
-    endpoint → raw full-page OCR text.
-
-    **Step 2** — Send raw text + question IDs to Gemini → structured
-    ``{question_id: answer_text}`` JSON.
+    **Step 1** — POST each image sequentially to LightNeon OCR 2 via the 
+    Cloudflare/ngrok endpoint → raw full-page OCR text.
 
     Args:
-        image_path: Path to the answer-sheet image.
-        question_ids: Expected question IDs, e.g. ``["1", "2", "6a"]``.
+        image_paths: List of paths to the answer-sheet images (or converted PDF pages).
         ocr_service_url: Full URL of the LightNeon OCR endpoint.
         ocr_api_key: API key for the OCR service (``x-api-key`` header).
-        gemini_api_key: Google Gemini API key.
-        gemini_model: Gemini model name. Defaults to ``"gemini-2.0-flash"``.
 
     Returns:
-        ``{question_id: answer_text}`` — missing answers default to ``""``.
+        One massive string containing all extracted text across all pages, 
+        delimited by `--- PAGE X ---` lines for clarity.
 
     Raises:
-        OcrException: On any failure in either step.
+        OcrException: On any LightNeon extraction failure.
     """
-    if not question_ids:
-        raise OcrException("question_ids must be a non-empty list.")
+    if not image_paths:
+        raise OcrException("No answer-sheet images provided.")
 
-    # Step 1 — LightNeon OCR 2
-    raw_ocr_text = _call_lightneon_ocr(
-        image_path=image_path,
-        ocr_service_url=ocr_service_url,
-        ocr_api_key=ocr_api_key,
-    )
-    logger.info("ocr: raw OCR text received (%d chars) — parsing with Gemini …", len(raw_ocr_text))
+    logger.info("ocr: Starting LightNeon extraction of %d answer sheets...", len(image_paths))
 
-    # Step 2 — Gemini parses raw text into per-question dict
-    extracted = _parse_answers_with_gemini(
-        raw_ocr_text=raw_ocr_text,
-        question_ids=question_ids,
-        gemini_api_key=gemini_api_key,
-        gemini_model=gemini_model,
-    )
+    all_text = []
+    
+    for i, path in enumerate(image_paths, start=1):
+        logger.info("ocr: Processing image %d of %d: %s", i, len(image_paths), path)
+        raw_page_text = _call_lightneon_ocr(
+            image_path=path,
+            ocr_service_url=ocr_service_url,
+            ocr_api_key=ocr_api_key,
+        )
+        
+        page_header = f"\n\n--- PAGE {i} -----------------------------------------------------\n\n"
+        all_text.append(page_header + raw_page_text)
 
-    # Validate / fill missing question IDs
-    result: dict[str, str] = {}
-    for qid in question_ids:
-        value = extracted.get(qid, "")
-        if not isinstance(value, str):
-            value = str(value)
-        result[qid] = value
-
-    missing = [qid for qid in question_ids if not result.get(qid)]
-    if missing:
-        logger.warning("ocr: no answer found for question(s): %s", missing)
-
-    logger.info("ocr: successfully extracted answers for %d question(s).", len(result))
-    return result
+    final_text = "".join(all_text).strip()
+    logger.info("ocr: successfully extracted %d chars across %d page(s).", len(final_text), len(image_paths))
+    return final_text

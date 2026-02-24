@@ -31,6 +31,7 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 # ---------------------------------------------------------------------------
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
+    "django.contrib.auth",
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
@@ -95,10 +96,10 @@ OCR_SERVICE_URL = os.getenv("OCR_SERVICE_URL", "")
 OCR_API_KEY = os.getenv("OCR_API_KEY", "")
 
 # ---------------------------------------------------------------------------
-# Google Gemini (OCR answer parsing + LLM evaluation)
+# Groq (LLM evaluation via OpenAI compat API)
 # ---------------------------------------------------------------------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # ---------------------------------------------------------------------------
 # Logging

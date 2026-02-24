@@ -3,9 +3,9 @@ core/evaluator.py
 
 LLM-based answer evaluator for the EduGrade AI system.
 
-Calls a self-hosted Ollama instance (exposed via Cloudflare / ngrok) to
-evaluate each student answer against the rubric criteria.  Processing is
-strictly sequential (one question at a time).
+Calls Google Gemini using a strict college-level examiner prompt
+to evaluate the entire exam (Question Paper + Rubrics + Answer Sheet)
+in a single, unified call.
 """
 
 import json
@@ -14,7 +14,7 @@ import re
 import time
 from typing import Any
 
-import requests
+from openai import OpenAI
 
 from core.exceptions import EvaluationException
 
@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL | re.IGNORECASE)
-
 
 def _strip_json_fences(text: str) -> str:
     """Remove Markdown JSON code fences from *text* if present.
@@ -44,178 +43,190 @@ def _strip_json_fences(text: str) -> str:
     return m.group(1).strip() if m else stripped
 
 
-def _clamp(value: int | float, lo: int, hi: int) -> int:
-    """Clamp *value* to ``[lo, hi]``.
-
-    Args:
-        value: The numeric value to clamp.
-        lo: Inclusive lower bound.
-        hi: Inclusive upper bound.
-
-    Returns:
-        Integer within ``[lo, hi]``.
-    """
-    return max(lo, min(hi, int(round(value))))
-
-
-def _format_criteria(criteria: list[dict[str, Any]]) -> str:
-    """Format rubric criteria as a numbered list string.
-
-    Args:
-        criteria: List of dicts with ``text`` and ``marks`` keys.
-
-    Returns:
-        Multi-line string of criteria.
-    """
-    if not criteria:
-        return "(No specific criteria provided.)"
-    return "\n".join(
-        f"  {i}. {c.get('text', '')}  [{c.get('marks', 0)} mark(s)]"
-        for i, c in enumerate(criteria, start=1)
-    )
-
-
 def _build_evaluation_prompt(
-    q_number: str,
-    description: str,
-    max_marks: int,
-    criteria: list[dict[str, Any]],
-    student_answer: str,
+    question_paper_text: str,
+    rubrics_text: str,
+    total_marks: int,
+    student_answers_text: str,
+    student_name: str,
 ) -> str:
-    """Build the Anna University examiner prompt for a single question.
+    """Build the monolithic Anna University examiner prompt.
 
     Args:
-        q_number: Question identifier, e.g. ``"1"`` or ``"6a"``.
-        description: Question description text.
-        max_marks: Maximum marks for this question.
-        criteria: List of rubric criteria dicts.
-        student_answer: The student's extracted answer text.
+        question_paper_text: Raw text extracted from the given question paper PDF.
+        rubrics_text: Teacher's strict rubrics.
+        total_marks: Max possible marks.
+        student_answers_text: Raw concatenated OCR text from the student's sheet.
+        student_name: Student name.
 
     Returns:
-        Fully formatted prompt string.
+        Fully formatted prompt string exactly as defined by the unified requirement.
     """
-    criteria_block = _format_criteria(criteria)
-    return (
-        "You are a strict college-level examiner for an Anna University affiliated institution "
-        "evaluating a 5th semester B.E. Computer Science exam paper.\n\n"
-        f"QUESTION Q{q_number}: {description}\n"
-        f"MAXIMUM MARKS: {max_marks}\n\n"
-        "MARKING SCHEME:\n"
-        f"{criteria_block}\n\n"
-        "STUDENT'S ANSWER:\n"
-        f"{student_answer}\n\n"
-        "EVALUATION INSTRUCTIONS:\n"
-        "- Award marks strictly based on the marking scheme above\n"
-        "- Partial marks are allowed per criteria point\n"
-        "- Evaluate at undergraduate college level — be fair but strict\n"
-        "- Do not award marks for vague, incorrect, or missing statements\n"
-        f"- awarded_marks must be between 0 and {max_marks} inclusive\n"
-        "- Return ONLY valid JSON with no markdown, no explanation outside JSON\n\n"
-        "JSON format:\n"
-        "{\n"
-        '  "awarded_marks": <integer>,\n'
-        f'  "out_of": {max_marks},\n'
-        '  "justification": "<2-3 sentences>",\n'
-        '  "key_points_covered": ["point1"],\n'
-        '  "missing_points": ["point2"],\n'
-        '  "confidence": "high" or "medium" or "low"\n'
-        "}"
-    )
+    return f"""You are a strict college-level examiner for an Anna University affiliated B.E. Computer Science program.
 
+You are evaluating ONE student's answer sheet.
 
-def _evaluate_single_question(
-    q_number: str,
-    rubric: dict[str, Any],
-    student_answer: str,
-    ollama_url: str,
-    model: str,
+You must follow the exact marking distribution defined in the rubrics.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GLOBAL EXAM DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+QUESTION PAPER:
+{question_paper_text}
+
+RUBRICS:
+{rubrics_text}
+
+TOTAL MARKS FOR EXAM:
+{total_marks}
+
+The rubrics may define marks using ranges such as:
+"1 to 5 - 2 marks each"
+"6 to 7 - 13 marks each"
+"8 - 14 marks"
+
+You must expand ranges properly before evaluation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STUDENT DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STUDENT NAME:
+{student_name}
+
+STUDENT ANSWERS:
+{student_answers_text}
+ 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EVALUATION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Identify all question numbers from the question paper.
+2. Derive exact max marks per question from rubrics.
+3. Evaluate each answer strictly.
+4. Award marks between 0 and max_marks.
+5. Partial marks allowed, but MUST BE WHOLE NUMBERS ONLY (no decimals, no half marks). If an answer deserves 1.5, you must evaluate carefully and assign either 1 or 2 as an integer.
+6. Missing answer → 0 marks.
+7. Do not exceed max_marks.
+8. Maintain consistent marking standard.
+9. Compute:
+   - total_marks_awarded
+   - percentage
+   - grade (use scale below)
+
+GRADE SCALE:
+O  = 91-100
+A+ = 81-90
+A  = 71-80
+B+ = 61-70
+B  = 51-60
+RA = below 50
+
+10. Provide:
+   - mistakes per question
+   - improvements per question
+   - 2-3 sentence feedback per question
+   - overall feedback (3-4 sentences)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT OUTPUT FORMAT (JSON ONLY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return ONLY valid JSON:
+
+{{
+  "student_name": "{student_name}",
+  "question_results": {{
+    "1": {{
+      "awarded_marks": 2,
+      "max_marks": 2,
+      "mistakes": ["..."],
+      "improvements": ["..."],
+      "feedback": "..."
+    }}
+  }},
+  "total_marks_awarded": 67,
+  "total_marks": {total_marks},
+  "percentage": 67.0,
+  "grade": "B+",
+  "overall_feedback": "Overall academic performance summary."
+}}
+
+No markdown.
+No explanation.
+Only JSON.
+"""
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def evaluate_entire_exam(
+    question_paper_text: str,
+    rubrics_text: str,
+    total_marks: int,
+    student_answers_text: str,
+    student_name: str,
+    groq_api_key: str,
+    model_name: str = "llama-3.3-70b-versatile",
 ) -> dict[str, Any]:
-    """Evaluate one question by calling the Ollama LLM (via Cloudflare URL).
+    """Evaluate the entire exam payload in a single call using Groq.
 
     Args:
-        q_number: Question identifier string.
-        rubric: Rubric dict for this question.
-        student_answer: The student's extracted answer text.
-        ollama_url: Base URL of the Ollama server (e.g. Cloudflare tunnel URL).
-        model: Ollama model name to use for evaluation.
+        question_paper_text: Extracted text from Question Paper PDF.
+        rubrics_text: Formatted rubric ranges from teacher.
+        total_marks: Expected total marks.
+        student_answers_text: Extracted raw text from OCR.
+        student_name: Student name.
+        groq_api_key: API Key for Groq.
+        model_name: Groq model ID.
 
     Returns:
-        Evaluation result dict.
+        Parsed JSON dictionary containing the entire evaluation.
 
     Raises:
         EvaluationException: On network, timeout, or JSON parsing failure.
     """
-    description = rubric.get("description", "")
-    max_marks: int = int(rubric.get("max_marks", 0))
-    criteria: list[dict[str, Any]] = rubric.get("criteria", [])
-
-    # ---- Short-circuit: empty student answer --------------------------------
-    if not student_answer or not student_answer.strip():
-        logger.info(
-            "evaluator: Q%s — student answer empty, awarding 0/%d.", q_number, max_marks
-        )
-        return {
-            "awarded_marks": 0,
-            "out_of": max_marks,
-            "justification": "No answer was provided by the student.",
-            "key_points_covered": [],
-            "missing_points": [c.get("text", "") for c in criteria],
-            "confidence": "high",
-        }
+    if not student_answers_text.strip():
+        logger.warning("evaluator: Student answers are empty. Groq may return all zeros.")
 
     prompt = _build_evaluation_prompt(
-        q_number, description, max_marks, criteria, student_answer
+        question_paper_text=question_paper_text,
+        rubrics_text=rubrics_text,
+        total_marks=total_marks,
+        student_answers_text=student_answers_text,
+        student_name=student_name,
     )
 
-    endpoint = f"{ollama_url.rstrip('/')}/api/generate"
-    payload: dict = {
-        "model": model,
-        "prompt": prompt,
-        "format": "json",
-        "stream": False,
-    }
+    client = OpenAI(
+        api_key=groq_api_key,
+        base_url="https://api.groq.com/openai/v1",
+    )
 
-    logger.info("evaluator: POST %s  model=%s  question=Q%s", endpoint, model, q_number)
+    logger.info("evaluator: sending single evaluation payload to Groq (%s)", model_name)
     start_ts = time.monotonic()
+    
     try:
-        response = requests.post(endpoint, json=payload, timeout=180)
-        response.raise_for_status()
-    except requests.exceptions.Timeout as exc:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "You are a strict, objective academic examiner. Output strictly JSON without any markdown formatting wrappers."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        raw_text = response.choices[0].message.content.strip()
+    except Exception as exc:
         raise EvaluationException(
-            f"Evaluation request for Q{q_number} timed out after 180 s.",
-            original_error=exc,
-        ) from exc
-    except requests.exceptions.ConnectionError as exc:
-        raise EvaluationException(
-            f"Cannot connect to Ollama at '{endpoint}'.",
-            original_error=exc,
-        ) from exc
-    except requests.exceptions.HTTPError as exc:
-        raise EvaluationException(
-            f"Ollama returned HTTP {response.status_code} for Q{q_number}: {response.text[:200]}",
-            original_error=exc,
-        ) from exc
-    except requests.exceptions.RequestException as exc:
-        raise EvaluationException(
-            f"Network error evaluating Q{q_number}: {exc}",
-            original_error=exc,
+            f"Groq evaluation failure: {exc}", original_error=exc
         ) from exc
     finally:
         elapsed = time.monotonic() - start_ts
-        logger.info("evaluator: Q%s completed in %.2f s", q_number, elapsed)
+        logger.info("evaluator: Groq evaluation completed in %.2f s", elapsed)
 
-    # ---- Parse response -----------------------------------------------------
-    try:
-        resp_json = response.json()
-    except ValueError as exc:
-        raise EvaluationException(
-            f"Ollama response for Q{q_number} is not valid JSON.",
-            original_error=exc,
-        ) from exc
-
-    raw_text: str = resp_json.get("response", "")
     if not raw_text:
-        raise EvaluationException(f"Ollama returned empty 'response' for Q{q_number}.")
+        raise EvaluationException("Groq returned empty response.")
 
     clean_text = _strip_json_fences(raw_text)
 
@@ -223,90 +234,54 @@ def _evaluate_single_question(
         evaluation: dict = json.loads(clean_text)
     except json.JSONDecodeError as exc:
         raise EvaluationException(
-            f"Model response for Q{q_number} is not valid JSON: {clean_text[:200]!r}",
+            f"Groq response is not valid JSON: {clean_text[:200]!r}",
             original_error=exc,
         ) from exc
 
     if not isinstance(evaluation, dict):
-        raise EvaluationException(
-            f"Expected a JSON object for Q{q_number}, got {type(evaluation).__name__}."
-        )
+        raise EvaluationException(f"Expected JSON object, got {type(evaluation).__name__}.")
 
-    # ---- Safe clamping ------------------------------------------------------
-    raw_marks = evaluation.get("awarded_marks", 0)
-    try:
-        awarded = _clamp(raw_marks, 0, max_marks)
-    except (TypeError, ValueError):
-        logger.warning(
-            "evaluator: Q%s — invalid awarded_marks %r, defaulting to 0.", q_number, raw_marks
-        )
-        awarded = 0
-
-    result: dict[str, Any] = {
-        "awarded_marks": awarded,
-        "out_of": max_marks,
-        "justification": str(evaluation.get("justification", "")),
-        "key_points_covered": evaluation.get("key_points_covered", []),
-        "missing_points": evaluation.get("missing_points", []),
-        "confidence": str(evaluation.get("confidence", "low")),
-    }
-    for list_key in ("key_points_covered", "missing_points"):
-        if not isinstance(result[list_key], list):
-            result[list_key] = [str(result[list_key])]
+    # --- Override LLM Arithmetic ---
+    # LLMs frequently hallucinate summations. Force compute the true total in Python.
+    actual_total_awarded = 0
+    question_results = evaluation.get("question_results", {})
+    for q_id, q_data in question_results.items():
+        val = q_data.get("awarded_marks", 0)
+        try:
+            actual_total_awarded += float(val) if '.' in str(val) else int(val)
+        except ValueError:
+            pass
+            
+    # Force whole-number coercion again just in case
+    actual_total_awarded = int(actual_total_awarded)
+    
+    # Recalculate Percentage
+    safe_max_marks = max(total_marks, 1)
+    actual_percentage = round((actual_total_awarded / safe_max_marks) * 100, 1)
+    
+    # Recalculate Grade based on prompt's scale
+    actual_grade = "RA"
+    if actual_percentage >= 91:
+        actual_grade = "O"
+    elif actual_percentage >= 81:
+        actual_grade = "A+"
+    elif actual_percentage >= 71:
+        actual_grade = "A"
+    elif actual_percentage >= 61:
+        actual_grade = "B+"
+    elif actual_percentage >= 51:
+        actual_grade = "B"
+        
+    evaluation["total_marks_awarded"] = actual_total_awarded
+    evaluation["percentage"] = actual_percentage
+    evaluation["grade"] = actual_grade
+    # --- End Override ---
 
     logger.info(
-        "evaluator: Q%s → %d/%d  confidence=%s",
-        q_number, awarded, max_marks, result["confidence"],
+        "evaluator: success — Awarded %s/%s. Grade: %s",
+        evaluation.get("total_marks_awarded", "?"),
+        evaluation.get("total_marks", "?"),
+        evaluation.get("grade", "?"),
     )
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def evaluate_answers(
-    ocr_output: dict[str, str],
-    parsed_rubrics: dict[str, Any],
-    ollama_url: str,
-    model: str,
-) -> dict[str, dict[str, Any]]:
-    """Evaluate all student answers using the self-hosted Ollama LLM.
-
-    Calls the Ollama instance at *ollama_url* (your Cloudflare-tunnelled
-    server) sequentially for each question.
-
-    Args:
-        ocr_output: ``{question_id: student_answer_text}`` from OCR step.
-        parsed_rubrics: ``{question_id: rubric_dict}`` from parser step.
-        ollama_url: Base URL of the Ollama server, e.g.
-            ``"https://xxxx.trycloudflare.com"`` or ``"https://xxxx.ngrok-free.app"``.
-        model: Ollama model name to use, e.g. ``"mistral"``, ``"llama3"``.
-
-    Returns:
-        ``{question_id: evaluation_result_dict}``
-
-    Raises:
-        EvaluationException: If *any* question evaluation fails.
-    """
-    if not parsed_rubrics:
-        raise EvaluationException("parsed_rubrics is empty — nothing to evaluate.")
-
-    results: dict[str, dict[str, Any]] = {}
-    for q_number, rubric in parsed_rubrics.items():
-        student_answer = ocr_output.get(q_number, "")
-        logger.info(
-            "evaluator: evaluating Q%s  max_marks=%s  answer_len=%d",
-            q_number, rubric.get("max_marks", "?"), len(student_answer),
-        )
-        result = _evaluate_single_question(
-            q_number=q_number,
-            rubric=rubric,
-            student_answer=student_answer,
-            ollama_url=ollama_url,
-            model=model,
-        )
-        results[q_number] = result
-
-    logger.info("evaluator: completed evaluation of %d question(s).", len(results))
-    return results
+    
+    return evaluation

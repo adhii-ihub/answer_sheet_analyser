@@ -4,143 +4,98 @@ core/pipeline.py
 Top-level orchestration pipeline for EduGrade AI.
 
 Stack:
-  OCR  → LightNeon OCR 2 (Cloudflare/ngrok endpoint) + Gemini for parsing
-  LLM  → Gemini (evaluation)
+  OCR  → LightNeon OCR 2 (Cloudflare/ngrok endpoint)
+  PDF  → PyMuPDF (question paper extraction, answer sheet conversion)
+  LLM  → Google Gemini (single monolithic examiner prompt)
 """
 
 import logging
 from typing import Any
 
 from core.exceptions import PipelineException
-from core.evaluator import evaluate_answers
+from core.evaluator import evaluate_entire_exam
 from core.ocr import extract_answers
-from core.parser import parse_rubrics
+from core.pdf_utils import extract_text_from_pdf, convert_pdf_to_images
 
 logger = logging.getLogger(__name__)
 
-_GRADE_SCALE: list[tuple[float, str]] = [
-    (91.0, "O"),
-    (81.0, "A+"),
-    (71.0, "A"),
-    (61.0, "B+"),
-    (51.0, "B"),
-    (0.0,  "RA"),
-]
-
-
-def _assign_grade(percentage: float) -> str:
-    """Map a percentage to an Anna University letter grade.
-
-    Args:
-        percentage: Score percentage (0–100).
-
-    Returns:
-        Grade string such as ``"O"``, ``"A+"``, or ``"RA"``.
-    """
-    for threshold, grade in _GRADE_SCALE:
-        if percentage >= threshold:
-            return grade
-    return "RA"
-
 
 def run_evaluation_pipeline(
-    image_path: str,
+    question_paper_path: str,
+    answer_sheet_paths: list[str],
     rubrics_text: str,
-    gemini_api_key: str,
+    student_name: str,
+    total_marks: int,
+    groq_api_key: str,
     ocr_service_url: str,
     ocr_api_key: str,
-    gemini_model: str = "gemini-2.0-flash",
+    groq_model: str = "llama-3.3-70b-versatile",
 ) -> dict[str, Any]:
-    """Run the full EduGrade AI evaluation pipeline.
+    """Run the simplified EduGrade AI evaluation pipeline.
 
     Steps (all sequential):
-
-    1. Parse rubrics.
-    2. LightNeon OCR 2 → raw text, then Gemini → per-question answers.
-    3. Gemini evaluates each answer against rubric.
-    4. Compute totals, percentage, and Anna University grade.
+    1. PyMuPDF → Extract raw text from Question Paper PDF.
+    2. LightNeon OCR 2 → Extract raw text from Answer Sheet images.
+    3. Groq → Evaluate everything via strict college-examiner prompt.
 
     Args:
-        image_path: Path to the answer-sheet image.
+        question_paper_path: Path to the question paper PDF.
+        answer_sheet_paths: List of paths to answer sheet images (already converted).
         rubrics_text: Raw rubric document text.
-        gemini_api_key: Google Gemini API key (used for both OCR parsing
-            and evaluation).
-        ocr_service_url: URL of the LightNeon OCR 2 endpoint,
-            e.g. ``"https://xxxx.ngrok-free.app/ocr"``.
+        student_name: Name of the student.
+        total_marks: Expected max marks for the exam.
+        groq_api_key: Groq API key for evaluation.
+        ocr_service_url: URL of the LightNeon OCR 2 endpoint.
         ocr_api_key: API key for the OCR service.
-        gemini_model: Gemini model name. Defaults to ``"gemini-2.0-flash"``.
+        groq_model: Groq model name. Defaults to ``"llama-3.3-70b-versatile"``.
 
     Returns:
-        ::
-
-            {
-                "total_marks": 42,
-                "max_total_marks": 50,
-                "percentage": 84.0,
-                "grade": "A+",
-                "question_results": { ... }
-            }
+        The exact JSON struct specified by the strict examiner prompt.
 
     Raises:
         PipelineException: On any failure in any step.
     """
-    logger.info("pipeline: starting EduGrade AI pipeline.")
+    logger.info("pipeline: starting unified EduGrade AI pipeline.")
     try:
-        # Step 1 — Parse rubrics
-        logger.info("pipeline: step 1/4 — parsing rubrics …")
-        parsed_rubrics = parse_rubrics(rubrics_text)
-        question_ids = list(parsed_rubrics.keys())
-        logger.info("pipeline: %d question(s): %s", len(question_ids), question_ids)
+        # Step 1 — Parse question paper PDF
+        logger.info("pipeline: step 1/3 — extracting question paper text …")
+        qp_text = extract_text_from_pdf(question_paper_path)
+        logger.info("pipeline: question paper %d chars.", len(qp_text))
 
-        # Step 2 — LightNeon OCR 2 + Gemini answer parsing
-        logger.info("pipeline: step 2/4 — OCR + Gemini answer extraction …")
-        ocr_output = extract_answers(
-            image_path=image_path,
-            question_ids=question_ids,
+        # Step 2 — Handle PDF vs Image conversion and LightNeon OCR
+        processed_images = []
+        for path in answer_sheet_paths:
+            if str(path).lower().endswith('.pdf'):
+                logger.info("pipeline: formatting PDF answer sheet to images: %s", path)
+                import tempfile
+                import os
+                temp_dir = tempfile.gettempdir()
+                converted = convert_pdf_to_images(path, temp_dir)
+                processed_images.extend(converted)
+            else:
+                processed_images.append(path)
+
+        logger.info("pipeline: step 2/3 — LightNeon OCR text extraction on %d pages …", len(processed_images))
+        student_answers_text = extract_answers(
+            image_paths=processed_images,
             ocr_service_url=ocr_service_url,
             ocr_api_key=ocr_api_key,
-            gemini_api_key=gemini_api_key,
-            gemini_model=gemini_model,
         )
-        logger.info("pipeline: %d answer(s) extracted.", len(ocr_output))
 
-        # Step 3 — Gemini evaluation
-        logger.info("pipeline: step 3/4 — Gemini evaluation …")
-        question_results = evaluate_answers(
-            ocr_output=ocr_output,
-            parsed_rubrics=parsed_rubrics,
-            gemini_api_key=gemini_api_key,
-            model=gemini_model,
+        # Step 3 — Groq complete evaluation
+        logger.info("pipeline: step 3/3 — Groq monolithic evaluation …")
+        final_result = evaluate_entire_exam(
+            question_paper_text=qp_text,
+            rubrics_text=rubrics_text,
+            total_marks=total_marks,
+            student_answers_text=student_answers_text,
+            student_name=student_name,
+            groq_api_key=groq_api_key,
+            model_name=groq_model,
         )
-        logger.info("pipeline: %d question(s) evaluated.", len(question_results))
 
-        # Step 4 — Totals + grade
-        logger.info("pipeline: step 4/4 — computing totals …")
-        total_marks = 0
-        max_total_marks = 0
-        for q_number, rubric in parsed_rubrics.items():
-            max_marks = int(rubric.get("max_marks", 0))
-            awarded = int(question_results.get(q_number, {}).get("awarded_marks", 0))
-            total_marks += awarded
-            max_total_marks += max_marks
-
-        percentage = (
-            round((total_marks / max_total_marks) * 100, 2)
-            if max_total_marks > 0 else 0.0
-        )
-        grade = _assign_grade(percentage)
-
-        logger.info(
-            "pipeline: RESULT — %d/%d (%.2f%%)  grade=%s",
-            total_marks, max_total_marks, percentage, grade,
-        )
-        return {
-            "total_marks": total_marks,
-            "max_total_marks": max_total_marks,
-            "percentage": percentage,
-            "grade": grade,
-            "question_results": question_results,
-        }
+        logger.info("pipeline: DONE.")
+        return final_result
 
     except PipelineException:
         raise
